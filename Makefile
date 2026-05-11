@@ -19,6 +19,7 @@ DAEMON     := $(BUILD)/discord-wranglerd
 SRCS       := src/main.cpp \
               src/config.cpp \
               src/proxy/url.cpp \
+              src/proxy/client.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
@@ -40,7 +41,7 @@ $(DAEMON): $(OBJS)
 TEST_CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -Werror -Isrc -Itests/unit
 TEST_BUILD    := $(BUILD)/tests
 
-UNIT_TESTS    := packet_file flow_table config url rate_limit
+UNIT_TESTS    := packet_file flow_table config url rate_limit client
 
 .PHONY: test test-unit test-integration
 test: test-unit test-integration
@@ -72,6 +73,10 @@ $(TEST_BUILD)/url_test: tests/unit/url_test.cpp tests/unit/main_test.cpp src/pro
 	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
 $(TEST_BUILD)/rate_limit_test: tests/unit/rate_limit_test.cpp tests/unit/main_test.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
+
+$(TEST_BUILD)/client_test: tests/unit/client_test.cpp tests/unit/main_test.cpp src/proxy/client.cpp src/proxy/url.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
