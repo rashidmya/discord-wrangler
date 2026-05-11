@@ -21,6 +21,7 @@ SRCS       := src/main.cpp \
               src/proxy/url.cpp \
               src/proxy/client.cpp \
               src/proxy/cgroup.cpp \
+              src/proxy/relay.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
