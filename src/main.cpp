@@ -23,14 +23,16 @@
 
 namespace {
 
-std::atomic<bool> g_terminate{false};
+// Rule state shared between the cgroup watcher callbacks and main(). Written
+// only by on_scope_appear / on_scope_disappear / main; the watcher fires
+// those serialized inside one thread, so plain atomics are enough.
 std::atomic<bool> g_rules_installed{false};
 std::string g_template_path = "/etc/nftables.d/discord-wrangler-proxy.nft.in";
 std::string g_cgroup_path;
 uint16_t    g_relay_port = 0;
 
 void on_signal(int) {
-    g_terminate.store(true);
+    // nfq::shutdown is what actually unblocks nfq::run() in the main thread.
     wrangler::direct::nfq::shutdown();
 }
 
@@ -66,7 +68,16 @@ int main(int argc, char** argv) {
     }
 
     wrangler::log::set_level_from_env();
-    auto cfg = wrangler::config::from_env();
+    wrangler::config::Config cfg;
+    try {
+        cfg = wrangler::config::from_env();
+    } catch (const std::exception& e) {
+        // config::from_env throws on the 0600-mismatch path (and possibly
+        // other future config errors). Translate to a clean exit-1 rather
+        // than letting std::terminate dump a core.
+        WLOG_ERROR("config: %s", e.what());
+        return 1;
+    }
 
     bool proxy_mode = !cfg.proxy.empty();
 

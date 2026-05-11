@@ -51,7 +51,7 @@ uint16_t udp_checksum_v4(uint32_t src, uint32_t dst,
 int init() {
     std::lock_guard<std::mutex> lk(s_mu);
     if (s_raw_fd >= 0) return 0;
-    int fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+    int fd = socket(AF_INET, SOCK_RAW | SOCK_CLOEXEC, IPPROTO_RAW);
     if (fd < 0) { int e = errno; WLOG_ERROR("raw socket: %s", strerror(e)); return -e; }
     int on = 1;
     if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &on, sizeof(on)) < 0) {

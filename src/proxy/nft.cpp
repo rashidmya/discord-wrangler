@@ -39,7 +39,7 @@ std::string render(const std::string& tmpl_path,
 // negative on any failure.
 int nft_apply(const std::string& rules) {
     int p[2];
-    if (::pipe(p) < 0) return -errno;
+    if (::pipe2(p, O_CLOEXEC) < 0) return -errno;
     pid_t pid = ::fork();
     if (pid < 0) {
         int e = errno; ::close(p[0]); ::close(p[1]); return -e;
