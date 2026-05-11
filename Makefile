@@ -18,6 +18,7 @@ DAEMON     := $(BUILD)/discord-wranglerd
 # Source files are added per-task — start with just main.cpp.
 SRCS       := src/main.cpp \
               src/config.cpp \
+              src/proxy/url.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
@@ -39,7 +40,7 @@ $(DAEMON): $(OBJS)
 TEST_CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -Werror -Isrc -Itests/unit
 TEST_BUILD    := $(BUILD)/tests
 
-UNIT_TESTS    := packet_file flow_table config
+UNIT_TESTS    := packet_file flow_table config url
 
 .PHONY: test test-unit test-integration
 test: test-unit test-integration
@@ -63,6 +64,10 @@ $(TEST_BUILD)/flow_table_test: tests/unit/flow_table_test.cpp tests/unit/main_te
 	$(CXX) $(TEST_CXXFLAGS) $^ -lpthread -o $@
 
 $(TEST_BUILD)/config_test: tests/unit/config_test.cpp tests/unit/main_test.cpp src/config.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
+
+$(TEST_BUILD)/url_test: tests/unit/url_test.cpp tests/unit/main_test.cpp src/proxy/url.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
