@@ -116,6 +116,17 @@ install: $(DAEMON)
 	chmod 0644 "$(NFTRULES_DIR)/discord-wrangler.nft"
 	install -m 0644 share/discord-wrangler-proxy.nft.in \
 	    "$(NFTRULES_DIR)/discord-wrangler-proxy.nft.in"
+	install -d "$(DESTDIR)/etc/discord-wrangler"
+	install -m 0644 share/discord-wrangler.conf.example \
+	    "$(DESTDIR)/etc/discord-wrangler/discord-wrangler.conf.example"
+	# Don't overwrite an existing conf file.
+	if [ ! -f "$(DESTDIR)/etc/discord-wrangler/discord-wrangler.conf" ]; then \
+	    install -m 0644 share/discord-wrangler.conf.example \
+	        "$(DESTDIR)/etc/discord-wrangler/discord-wrangler.conf"; \
+	fi
+	install -d "$(DESTDIR)$(PREFIX)/bin"
+	install -m 0755 share/discord-wrangler-launch  "$(DESTDIR)$(PREFIX)/bin/discord-wrangler-launch"
+	install -m 0755 share/discord-wrangler-cleanup "$(SBINDIR_INST)/discord-wrangler-cleanup"
 	@if [ -z "$(DESTDIR)" ]; then \
 	    systemd-sysusers && \
 	    systemctl daemon-reload && \
@@ -137,6 +148,10 @@ uninstall:
 	-rm -f "$(NFTRULES_DIR)/discord-wrangler.nft"
 	-rm -f "$(NFTRULES_DIR)/discord-wrangler-proxy.nft.in"
 	-nft delete table inet discord_wrangler_proxy 2>/dev/null
+	-rm -f "$(SBINDIR_INST)/discord-wrangler-cleanup"
+	-rm -f "$(DESTDIR)$(PREFIX)/bin/discord-wrangler-launch"
+	-rm -f "$(DESTDIR)/etc/discord-wrangler/discord-wrangler.conf.example"
+	@echo "(Note: /etc/discord-wrangler/discord-wrangler.conf preserved if you customized it)"
 	-rm -f "$(SBINDIR_INST)/discord-wranglerd"
 	-rm -rf "$(DOCDIR_INST)"
 	-systemctl daemon-reload
