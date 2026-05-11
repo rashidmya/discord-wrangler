@@ -20,6 +20,7 @@ SRCS       := src/main.cpp \
               src/config.cpp \
               src/proxy/url.cpp \
               src/proxy/client.cpp \
+              src/proxy/cgroup.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
@@ -41,7 +42,7 @@ $(DAEMON): $(OBJS)
 TEST_CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -Werror -Isrc -Itests/unit
 TEST_BUILD    := $(BUILD)/tests
 
-UNIT_TESTS    := packet_file flow_table config url rate_limit client
+UNIT_TESTS    := packet_file flow_table config url rate_limit client cgroup
 
 .PHONY: test test-unit test-integration
 test: test-unit test-integration
@@ -79,6 +80,10 @@ $(TEST_BUILD)/rate_limit_test: tests/unit/rate_limit_test.cpp tests/unit/main_te
 $(TEST_BUILD)/client_test: tests/unit/client_test.cpp tests/unit/main_test.cpp src/proxy/client.cpp src/proxy/url.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) $^ -lpthread -o $@
+
+$(TEST_BUILD)/cgroup_test: tests/unit/cgroup_test.cpp tests/unit/main_test.cpp src/proxy/cgroup.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
 # ---- install / uninstall ----
 QUEUE_NUM   ?= 0
