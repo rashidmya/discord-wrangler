@@ -11,10 +11,13 @@ struct Config {
     uint16_t    first_len    = 74;   // matches Discord's IP-discovery
     uint32_t    hold_ms      = 50;   // matches upstream
     std::string packet_file;          // empty = disabled
+
+    // proxy-mode (Task 4)
+    std::string proxy;            // empty => proxy mode disabled
+    uint16_t    relay_port  = 41080;
+    uint32_t    discord_uid = 0;  // 0 means "unset"; required if proxy is set
 };
 
-// Reads env vars only (legacy behavior).
-// Task 3 expands this to read /etc/discord-wrangler/discord-wrangler.conf as well.
 Config from_env();
 
 } // namespace wrangler::config

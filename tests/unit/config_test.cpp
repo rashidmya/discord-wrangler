@@ -2,6 +2,7 @@
 #include "config.hpp"
 
 #include <cstdlib>
+#include <stdexcept>
 
 namespace {
 void unset_all_env() {
@@ -9,6 +10,9 @@ void unset_all_env() {
     unsetenv("WRANGLER_FIRST_LEN");
     unsetenv("WRANGLER_HOLD_MS");
     unsetenv("WRANGLER_PACKET_FILE");
+    unsetenv("WRANGLER_PROXY");
+    unsetenv("WRANGLER_RELAY_PORT");
+    unsetenv("WRANGLER_DISCORD_UID");
 }
 } // namespace
 
@@ -129,4 +133,70 @@ TEST_CASE("config: missing file -- defaults used") {
     auto c = wrangler::config::from_env();
     CHECK(c.queue_num == 0u);
     unsetenv("WRANGLER_CONF_FILE");
+}
+
+TEST_CASE("config: proxy fields from file") {
+    unset_all_env();
+    TmpConfFile f(
+        "[wrangler]\n"
+        "proxy = socks5://127.0.0.1:1080\n"
+        "relay_port = 41080\n"
+        "discord_uid = 1000\n"
+    );
+    auto c = wrangler::config::from_env();
+    CHECK(c.proxy       == "socks5://127.0.0.1:1080");
+    CHECK(c.relay_port  == 41080u);
+    CHECK(c.discord_uid == 1000u);
+}
+
+TEST_CASE("config: proxy fields from env") {
+    unset_all_env();
+    setenv("WRANGLER_PROXY",       "http://example:8080", 1);
+    setenv("WRANGLER_RELAY_PORT",  "42000",               1);
+    setenv("WRANGLER_DISCORD_UID", "1234",                1);
+    auto c = wrangler::config::from_env();
+    CHECK(c.proxy       == "http://example:8080");
+    CHECK(c.relay_port  == 42000u);
+    CHECK(c.discord_uid == 1234u);
+    unsetenv("WRANGLER_PROXY");
+    unsetenv("WRANGLER_RELAY_PORT");
+    unsetenv("WRANGLER_DISCORD_UID");
+}
+
+TEST_CASE("config: proxy mode disabled by default") {
+    unset_all_env();
+    auto c = wrangler::config::from_env();
+    CHECK(c.proxy == "");
+}
+
+TEST_CASE("config: file with creds at mode 0600 is accepted") {
+    unset_all_env();
+    TmpConfFile f("[wrangler]\nproxy = socks5://user:pass@host:1080\n");
+    chmod(f.path.c_str(), 0600);
+    auto c = wrangler::config::from_env();
+    CHECK(c.proxy == "socks5://user:pass@host:1080");
+}
+
+TEST_CASE("config: file with creds at mode 0644 is rejected") {
+    unset_all_env();
+    TmpConfFile f("[wrangler]\nproxy = socks5://user:pass@host:1080\n");
+    chmod(f.path.c_str(), 0644);
+    CHECK_THROWS_AS(wrangler::config::from_env(), std::runtime_error);
+}
+
+TEST_CASE("config: file at mode 0644 without creds is fine") {
+    unset_all_env();
+    TmpConfFile f("[wrangler]\nproxy = socks5://host:1080\n");
+    chmod(f.path.c_str(), 0644);
+    auto c = wrangler::config::from_env();
+    CHECK(c.proxy == "socks5://host:1080");
+}
+
+TEST_CASE("config: file with empty userinfo at mode 0644 is rejected") {
+    // Empty userinfo (scheme://@host) still has an `@` — the structural
+    // signal that a credentials slot exists. The 0600 check applies.
+    unset_all_env();
+    TmpConfFile f("[wrangler]\nproxy = socks5://@host:1080\n");
+    chmod(f.path.c_str(), 0644);
+    CHECK_THROWS_AS(wrangler::config::from_env(), std::runtime_error);
 }
