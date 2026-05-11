@@ -17,6 +17,13 @@
 #include <thread>
 #include <unistd.h>
 
+#include <fcntl.h>
+#include <netdb.h>
+#include <poll.h>
+#include <cstdlib>
+#include <linux/netfilter_ipv4.h>
+#include <linux/netfilter_ipv6/ip6_tables.h>
+
 namespace wrangler::proxy::relay {
 namespace {
 
@@ -57,10 +64,163 @@ int make_listener(int family, uint16_t port) {
     return fd;
 }
 
-// Per-connection handler (this task: just close and count).
+// Resolve the original destination for a client_fd. Falls back to
+// WRANGLER_RELAY_FORCE_DST (test-only override; ignored if SO_ORIGINAL_DST
+// already succeeded).
+bool resolve_orig_dst(int client_fd, client::OrigDst& out) {
+    sockaddr_storage ss{};
+    socklen_t len = sizeof(ss);
+
+    // Try v4 first.
+    if (::getsockopt(client_fd, SOL_IP, SO_ORIGINAL_DST, &ss, &len) == 0) {
+        auto* a = reinterpret_cast<sockaddr_in*>(&ss);
+        out.family = AF_INET;
+        std::memcpy(out.addr, &a->sin_addr.s_addr, 4);
+        out.port = a->sin_port;
+        return true;
+    }
+    // Try v6.
+    len = sizeof(ss);
+    if (::getsockopt(client_fd, SOL_IPV6, IP6T_SO_ORIGINAL_DST, &ss, &len) == 0) {
+        auto* a = reinterpret_cast<sockaddr_in6*>(&ss);
+        out.family = AF_INET6;
+        std::memcpy(out.addr, &a->sin6_addr, 16);
+        out.port = a->sin6_port;
+        return true;
+    }
+    // Test override.
+    if (const char* force = std::getenv("WRANGLER_RELAY_FORCE_DST")) {
+        std::string s = force;
+        auto colon = s.rfind(':');
+        if (colon == std::string::npos) return false;
+        std::string h = s.substr(0, colon);
+        uint16_t p = static_cast<uint16_t>(std::atoi(s.c_str() + colon + 1));
+        if (!h.empty() && h.front() == '[' && h.back() == ']') {
+            h = h.substr(1, h.size() - 2);
+        }
+        if (h.find(':') != std::string::npos) {
+            out.family = AF_INET6;
+            ::inet_pton(AF_INET6, h.c_str(), out.addr);
+        } else {
+            out.family = AF_INET;
+            uint32_t ip = 0;
+            ::inet_pton(AF_INET, h.c_str(), &ip);
+            std::memcpy(out.addr, &ip, 4);
+        }
+        out.port = htons(p);
+        return true;
+    }
+    return false;
+}
+
+int dial_upstream(const url::ProxyUrl& cfg) {
+    addrinfo hints{};
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    std::string port_s = std::to_string(cfg.port);
+    if (::getaddrinfo(cfg.host.c_str(), port_s.c_str(), &hints, &res) != 0 || !res) {
+        return -EHOSTUNREACH;
+    }
+    int fd = -1;
+    for (auto* p = res; p; p = p->ai_next) {
+        fd = ::socket(p->ai_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (fd < 0) continue;
+        if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
+        ::close(fd); fd = -1;
+    }
+    ::freeaddrinfo(res);
+    return fd >= 0 ? fd : -ECONNREFUSED;
+}
+
+// Pipe-pair-based bidirectional splice. Returns when either side EOFs.
+void splice_both(int a, int b) {
+    int p1[2], p2[2];
+    if (::pipe2(p1, O_CLOEXEC) < 0) return;
+    if (::pipe2(p2, O_CLOEXEC) < 0) {
+        ::close(p1[0]); ::close(p1[1]);
+        return;
+    }
+
+    pollfd pfd[2];
+    pfd[0].fd = a; pfd[0].events = POLLIN;
+    pfd[1].fd = b; pfd[1].events = POLLIN;
+
+    constexpr size_t CHUNK = 16384;
+    while (true) {
+        pfd[0].revents = 0; pfd[1].revents = 0;
+        int n = ::poll(pfd, 2, -1);
+        if (n <= 0) { if (errno == EINTR) continue; break; }
+        bool eof = false;
+        if (pfd[0].revents & POLLIN) {
+            ssize_t r = ::splice(a, nullptr, p1[1], nullptr, CHUNK,
+                                 SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+            if (r <= 0) { eof = true; }
+            else {
+                ssize_t w = ::splice(p1[0], nullptr, b, nullptr, r,
+                                     SPLICE_F_MOVE);
+                if (w <= 0) eof = true;
+            }
+        }
+        if (pfd[1].revents & POLLIN) {
+            ssize_t r = ::splice(b, nullptr, p2[1], nullptr, CHUNK,
+                                 SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+            if (r <= 0) { eof = true; }
+            else {
+                ssize_t w = ::splice(p2[0], nullptr, a, nullptr, r,
+                                     SPLICE_F_MOVE);
+                if (w <= 0) eof = true;
+            }
+        }
+        if (pfd[0].revents & (POLLHUP|POLLERR)) eof = true;
+        if (pfd[1].revents & (POLLHUP|POLLERR)) eof = true;
+        if (eof) break;
+    }
+    ::close(p1[0]); ::close(p1[1]);
+    ::close(p2[0]); ::close(p2[1]);
+}
+
+// Module-level state for the upstream URL + rate limiter.
+url::ProxyUrl g_proxy_cfg{};
+RateLimiter g_log_limit{std::chrono::seconds(30)};
+
 void handle_conn(int client_fd) {
-    ::close(client_fd);
-    g_inflight.fetch_sub(1, std::memory_order_release);
+    auto on_exit = [&](int code) {
+        ::close(client_fd);
+        g_inflight.fetch_sub(1, std::memory_order_release);
+        (void)code;
+    };
+
+    client::OrigDst dst{};
+    if (!resolve_orig_dst(client_fd, dst)) {
+        if (g_log_limit.allow("no-orig-dst")) {
+            WLOG_WARN("relay: no SO_ORIGINAL_DST on connection -- dropping");
+        }
+        return on_exit(-1);
+    }
+
+    int up = dial_upstream(g_proxy_cfg);
+    if (up < 0) {
+        std::string key = "dial:" + g_proxy_cfg.host + ":" + std::to_string(g_proxy_cfg.port);
+        if (g_log_limit.allow(key)) {
+            WLOG_WARN("relay: dial %s failed: %s",
+                      client::redact_url(g_proxy_cfg).c_str(), strerror(-up));
+        }
+        return on_exit(up);
+    }
+
+    if (int r = client::handshake(up, dst, g_proxy_cfg); r != 0) {
+        if (g_log_limit.allow("handshake-err")) {
+            WLOG_WARN("relay: handshake to %s failed: %s",
+                      client::redact_url(g_proxy_cfg).c_str(), strerror(-r));
+        }
+        ::close(up);
+        return on_exit(r);
+    }
+
+    splice_both(client_fd, up);
+    ::close(up);
+    on_exit(0);
 }
 
 void accept_loop() {
@@ -103,6 +263,16 @@ void accept_loop() {
 } // namespace
 
 int start(const wrangler::config::Config& cfg) {
+    auto parsed = url::parse(cfg.proxy);
+    if (!parsed) {
+        // Don't log cfg.proxy here — an unparseable URL may still contain
+        // a recognizable user:pass@ segment we'd leak to the journal.
+        WLOG_ERROR("relay: WRANGLER_PROXY value is unparseable (check scheme/host/port)");
+        return -EINVAL;
+    }
+    g_proxy_cfg = *parsed;
+    WLOG_INFO("relay: upstream proxy = %s", client::redact_url(g_proxy_cfg).c_str());
+
     g_listen_v4 = make_listener(AF_INET,  cfg.relay_port);
     if (g_listen_v4 < 0) {
         WLOG_ERROR("relay: bind v4 :%u failed: %s",
