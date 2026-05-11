@@ -3,7 +3,9 @@
 #include "log.hpp"
 
 #include <arpa/inet.h>
+#include <cctype>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <unistd.h>
@@ -33,6 +35,36 @@ int read_all(int fd, void* buf, size_t n) {
         p += r; n -= static_cast<size_t>(r);
     }
     return 0;
+}
+
+std::string base64_encode(const std::string& in) {
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((in.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < in.size(); i += 3) {
+        uint32_t v = static_cast<uint8_t>(in[i]) << 16;
+        if (i + 1 < in.size()) v |= static_cast<uint8_t>(in[i+1]) << 8;
+        if (i + 2 < in.size()) v |= static_cast<uint8_t>(in[i+2]);
+        out += tbl[(v >> 18) & 0x3f];
+        out += tbl[(v >> 12) & 0x3f];
+        out += (i + 1 < in.size()) ? tbl[(v >> 6) & 0x3f] : '=';
+        out += (i + 2 < in.size()) ? tbl[v & 0x3f]        : '=';
+    }
+    return out;
+}
+
+std::string format_dst(const OrigDst& d) {
+    char buf[INET6_ADDRSTRLEN];
+    if (d.family == AF_INET) {
+        if (!::inet_ntop(AF_INET, d.addr, buf, sizeof(buf))) return "";
+        return std::string(buf) + ":" + std::to_string(ntohs(d.port));
+    }
+    if (d.family == AF_INET6) {
+        if (!::inet_ntop(AF_INET6, d.addr, buf, sizeof(buf))) return "";
+        return std::string("[") + buf + "]:" + std::to_string(ntohs(d.port));
+    }
+    return "";
 }
 
 } // namespace
@@ -147,11 +179,68 @@ int handshake_socks5(int fd, const OrigDst& dst,
     return 0;
 }
 
-int handshake_http_connect(int, const OrigDst&, const std::string&, const std::string&) {
-    return -ENOSYS;
+int handshake_http_connect(int fd, const OrigDst& dst,
+                           const std::string& user, const std::string& pass) {
+    std::string target = format_dst(dst);
+    if (target.empty()) return -EAFNOSUPPORT;
+
+    std::string req;
+    req.reserve(256);
+    req += "CONNECT " + target + " HTTP/1.1\r\n";
+    req += "Host: " + target + "\r\n";
+    if (!user.empty() || !pass.empty()) {
+        req += "Proxy-Authorization: Basic " + base64_encode(user + ":" + pass) + "\r\n";
+    }
+    req += "\r\n";
+    if (int r = write_all(fd, req.data(), req.size())) return r;
+
+    // Read response headers until "\r\n\r\n".
+    std::string buf;
+    buf.reserve(512);
+    while (true) {
+        char c;
+        ssize_t r = ::read(fd, &c, 1);
+        if (r < 0) { if (errno == EINTR) continue; return -errno; }
+        if (r == 0) return -EPIPE;
+        buf += c;
+        if (buf.size() > 8192) {
+            WLOG_WARN("http_connect: response headers exceed 8 KiB; bailing");
+            return -EMSGSIZE;
+        }
+        if (buf.size() >= 4 && buf.compare(buf.size()-4, 4, "\r\n\r\n") == 0) break;
+    }
+
+    // Parse status line: "HTTP/1.x SSS reason\r\n"
+    if (buf.size() < 12 || buf.compare(0, 5, "HTTP/") != 0) {
+        WLOG_WARN("http_connect: malformed status line");
+        return -EPROTO;
+    }
+    auto sp = buf.find(' ');
+    if (sp == std::string::npos || sp + 4 > buf.size()) return -EPROTO;
+    // Require a digit immediately after the version-code separator. atoi would
+    // otherwise treat non-numeric status (e.g. "HTTP/1.1 ??? Unknown") as 0
+    // and route it through the ECONNREFUSED branch, masking the real cause.
+    if (!std::isdigit(static_cast<unsigned char>(buf[sp + 1]))) {
+        WLOG_WARN("http_connect: non-numeric status code");
+        return -EPROTO;
+    }
+    int status = std::atoi(buf.c_str() + sp + 1);
+    if (status < 200 || status > 299) {
+        WLOG_ERROR("http_connect: rejected with status %d", status);
+        if (status == 407) return -EACCES;
+        return -ECONNREFUSED;
+    }
+    return 0;
 }
-int handshake(int, const OrigDst&, const url::ProxyUrl&) {
-    return -ENOSYS;
+
+int handshake(int fd, const OrigDst& dst, const url::ProxyUrl& cfg) {
+    // Scheme is currently Socks5 | HttpConnect — these two branches are
+    // exhaustive. If a third scheme is ever added, the URL parser should
+    // reject it long before reaching here; adjust this dispatcher then.
+    if (cfg.scheme == url::Scheme::Socks5) {
+        return handshake_socks5(fd, dst, cfg.user, cfg.pass);
+    }
+    return handshake_http_connect(fd, dst, cfg.user, cfg.pass);
 }
 
 } // namespace wrangler::proxy::client

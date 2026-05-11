@@ -198,3 +198,140 @@ TEST_CASE("socks5: ipv6 dst") {
     t.join();
     CHECK(rc == 0);
 }
+
+namespace {
+std::string read_until_double_crlf(int fd) {
+    std::string buf;
+    while (true) {
+        char c;
+        ssize_t r = ::read(fd, &c, 1);
+        REQUIRE(r == 1);
+        buf += c;
+        if (buf.size() >= 4 && buf.compare(buf.size()-4, 4, "\r\n\r\n") == 0) break;
+    }
+    return buf;
+}
+} // namespace
+
+TEST_CASE("http_connect: no-auth 200") {
+    Pair p;
+    int rc = -1;
+    std::thread t([&]{
+        rc = client::handshake_http_connect(
+            p.ours, v4_dst(htonl(0x7f000001), htons(443)), "", "");
+    });
+    auto req = read_until_double_crlf(p.peer);
+    CHECK(req.find("CONNECT 127.0.0.1:443 HTTP/1.1\r\n") != std::string::npos);
+    CHECK(req.find("Host: 127.0.0.1:443\r\n") != std::string::npos);
+    CHECK(req.find("Proxy-Authorization:") == std::string::npos);
+    std::string reply = "HTTP/1.1 200 Connection established\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == 0);
+}
+
+TEST_CASE("http_connect: basic auth") {
+    Pair p;
+    int rc = -1;
+    std::thread t([&]{
+        rc = client::handshake_http_connect(
+            p.ours, v4_dst(htonl(0x08080808), htons(80)), "alice", "s3cret");
+    });
+    auto req = read_until_double_crlf(p.peer);
+    // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
+    CHECK(req.find("Proxy-Authorization: Basic YWxpY2U6czNjcmV0\r\n") != std::string::npos);
+    std::string reply = "HTTP/1.1 200 OK\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == 0);
+}
+
+TEST_CASE("http_connect: 407 rejected") {
+    Pair p;
+    int rc = 0;
+    std::thread t([&]{
+        rc = client::handshake_http_connect(p.ours, v4_dst(0, 0), "u", "p");
+    });
+    (void)read_until_double_crlf(p.peer);
+    std::string reply = "HTTP/1.1 407 Proxy Authentication Required\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == -EACCES);
+}
+
+TEST_CASE("http_connect: 502 rejected") {
+    Pair p;
+    int rc = 0;
+    std::thread t([&]{
+        rc = client::handshake_http_connect(p.ours, v4_dst(0, 0), "", "");
+    });
+    (void)read_until_double_crlf(p.peer);
+    std::string reply = "HTTP/1.1 502 Bad Gateway\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == -ECONNREFUSED);
+}
+
+TEST_CASE("http_connect: non-numeric status code rejected") {
+    Pair p;
+    int rc = 0;
+    std::thread t([&]{
+        rc = client::handshake_http_connect(p.ours, v4_dst(0, 0), "", "");
+    });
+    (void)read_until_double_crlf(p.peer);
+    std::string reply = "HTTP/1.1 ??? Unknown\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == -EPROTO);
+}
+
+TEST_CASE("http_connect: ipv6 dst bracketed") {
+    Pair p;
+    int rc = -1;
+    client::OrigDst d{};
+    d.family = AF_INET6;
+    uint8_t v6[16] = {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1};
+    std::memcpy(d.addr, v6, 16);
+    d.port = htons(8443);
+    std::thread t([&]{
+        rc = client::handshake_http_connect(p.ours, d, "", "");
+    });
+    auto req = read_until_double_crlf(p.peer);
+    CHECK(req.find("CONNECT [::1]:8443 HTTP/1.1\r\n") != std::string::npos);
+    std::string reply = "HTTP/1.1 200 OK\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == 0);
+}
+
+TEST_CASE("handshake: dispatcher picks SOCKS5 by scheme") {
+    Pair p;
+    int rc = -1;
+    auto cfg = url::parse("socks5://host:1080").value();
+    std::thread t([&]{
+        rc = client::handshake(p.ours, v4_dst(htonl(0x7f000001), htons(80)), cfg);
+    });
+    // Expect SOCKS5 greeting, not HTTP CONNECT
+    auto greet = read_exact(p.peer, 3);
+    CHECK(greet[0] == 0x05);  // SOCKS5 version byte
+    write_all(p.peer, {0x05, 0x00});
+    (void)read_exact(p.peer, 10);
+    write_all(p.peer, {0x05, 0x00, 0x00, 0x01, 0,0,0,0, 0,0});
+    t.join();
+    CHECK(rc == 0);
+}
+
+TEST_CASE("handshake: dispatcher picks HTTP CONNECT by scheme") {
+    Pair p;
+    int rc = -1;
+    auto cfg = url::parse("http://host:8080").value();
+    std::thread t([&]{
+        rc = client::handshake(p.ours, v4_dst(htonl(0x7f000001), htons(80)), cfg);
+    });
+    auto req = read_until_double_crlf(p.peer);
+    CHECK(req.substr(0, 8) == "CONNECT ");  // HTTP, not SOCKS5
+    std::string reply = "HTTP/1.1 200 OK\r\n\r\n";
+    write_all(p.peer, std::vector<uint8_t>(reply.begin(), reply.end()));
+    t.join();
+    CHECK(rc == 0);
+}
