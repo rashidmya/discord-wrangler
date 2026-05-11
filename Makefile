@@ -78,7 +78,7 @@ $(TEST_BUILD)/rate_limit_test: tests/unit/rate_limit_test.cpp tests/unit/main_te
 
 $(TEST_BUILD)/client_test: tests/unit/client_test.cpp tests/unit/main_test.cpp src/proxy/client.cpp src/proxy/url.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
+	$(CXX) $(TEST_CXXFLAGS) $^ -lpthread -o $@
 
 # ---- install / uninstall ----
 QUEUE_NUM   ?= 0
