@@ -14,21 +14,44 @@ From the DPI's perspective, the first packet of the flow is now a 1-byte garbage
 
 Nothing else changes. No proxy. No VPN. No kernel module. The daemon runs as a dedicated system user with `CAP_NET_ADMIN` and `CAP_NET_RAW` and no other privileges. If the daemon stops or crashes, the nftables rule has a `bypass` flag, so packets just pass through normally — Discord still works (voice will fail again on a blocked network, but nothing else breaks).
 
-## Build and install
+## Install
 
-### Arch / CachyOS
+### 1. Prerequisites
+
+Arch / CachyOS:
 
 ```sh
 sudo pacman -S libnetfilter_queue libnfnetlink nftables
-make
-sudo make install
 ```
 
-### Ubuntu / Debian
+Ubuntu / Debian:
 
 ```sh
 sudo apt update
 sudo apt install build-essential libnetfilter-queue-dev libmnl-dev nftables
+```
+
+You also need a C++17 compiler (`g++` 7+ or `clang++` 5+, included in `build-essential` on Debian/Ubuntu and present by default on Arch).
+
+### 2. Get the source
+
+Clone the repo:
+
+```sh
+git clone https://github.com/rashidmya/discord-wrangler.git
+cd discord-wrangler
+```
+
+Or grab a release tarball (replace `v0.1` with the latest tag from [Releases](https://github.com/rashidmya/discord-wrangler/releases)):
+
+```sh
+curl -L https://github.com/rashidmya/discord-wrangler/archive/refs/tags/v0.1.tar.gz | tar xz
+cd discord-wrangler-0.1
+```
+
+### 3. Build and install
+
+```sh
 make
 sudo make install
 ```
