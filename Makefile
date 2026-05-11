@@ -17,6 +17,7 @@ DAEMON     := $(BUILD)/discord-wranglerd
 
 # Source files are added per-task — start with just main.cpp.
 SRCS       := src/main.cpp \
+              src/config.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
@@ -35,10 +36,10 @@ $(DAEMON): $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LDLIBS)
 
 # ---- tests ----
-TEST_CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -Werror
+TEST_CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -Werror -Isrc -Itests/unit
 TEST_BUILD    := $(BUILD)/tests
 
-UNIT_TESTS    := packet_file flow_table
+UNIT_TESTS    := packet_file flow_table config
 
 .PHONY: test test-unit test-integration
 test: test-unit test-integration
@@ -55,11 +56,15 @@ run-test-%: $(TEST_BUILD)/%_test
 
 $(TEST_BUILD)/packet_file_test: tests/unit/packet_file_test.cpp tests/unit/main_test.cpp src/direct/packet_file.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(TEST_CXXFLAGS) -Isrc -Itests/unit $^ -o $@
+	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
 $(TEST_BUILD)/flow_table_test: tests/unit/flow_table_test.cpp tests/unit/main_test.cpp src/direct/flow_table.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(TEST_CXXFLAGS) -Isrc -Itests/unit $^ -lpthread -o $@
+	$(CXX) $(TEST_CXXFLAGS) $^ -lpthread -o $@
+
+$(TEST_BUILD)/config_test: tests/unit/config_test.cpp tests/unit/main_test.cpp src/config.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) $^ -o $@
 
 # ---- install / uninstall ----
 QUEUE_NUM   ?= 0
