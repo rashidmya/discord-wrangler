@@ -30,3 +30,26 @@ After build + sudo install, verify on a real Discord client.
 - Re-verify: `systemctl status discord-wrangler` → `not-found`
 - `sudo nft list table inet discord_wrangler` → "No such file" (rule removed)
 - Voice fails as before (no manipulation).
+
+## Proxy mode (manual)
+
+### Setup
+1. Configure: `sudo $EDITOR /etc/discord-wrangler/discord-wrangler.conf`. Set `proxy`, `discord_uid`, `relay_port`.
+2. If your `proxy` includes `user:pass@`, `sudo chmod 0600` the file.
+3. Start a SOCKS5 endpoint: `ssh -D 1080 -N your-external-host` (or use a real proxy).
+4. Restart the daemon: `sudo systemctl restart discord-wrangler`.
+5. Check logs: `journalctl -u discord-wrangler -f`. Expect `relay: listening on 127.0.0.1:41080`.
+
+### Test
+1. Launch Discord via `discord-wrangler-launch`.
+2. Verify:
+   - Discord logs in (REST API works).
+   - Messages send (gateway WebSocket works).
+   - You can join a voice channel and hear/be-heard (UDP voice bypass still active).
+3. Check `nft list table inet discord_wrangler_proxy` shows the redirect rule.
+4. Stop Discord. Confirm the daemon journal shows `cgroup: scope disappeared -- removing rules`.
+
+### Failure modes to verify
+- Wrong proxy creds → journal shows `socks5: user/pass auth rejected` every 30s while Discord is open. Discord can't log in.
+- Proxy down (kill the SSH tunnel mid-session) → journal shows rate-limited dial-failure warnings. Discord shows network errors.
+- Wrong `discord_uid` → launcher works, but the daemon's rule doesn't match Discord's cgroup. Discord runs in Direct mode only (voice works, TCP unproxied).

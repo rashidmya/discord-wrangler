@@ -77,6 +77,52 @@ Override the defaults with `sudo systemctl edit discord-wrangler` (creates a dro
 | `WRANGLER_HOLD_MS` | `50` | How long to delay Discord's original packet after sending the probes. |
 | `WRANGLER_QUEUE_NUM` | `0` | NFQUEUE queue number. Has to match the nftables rule. |
 
+## Proxy mode
+
+By default, discord-wrangler runs in "Direct mode" — fixes voice via UDP probes, leaves all TCP alone. If Discord's REST API and gateway (TCP) are also blocked on your network, enable Proxy mode to tunnel Discord's TCP through an HTTP or SOCKS5 proxy. This is the Linux equivalent of upstream [discord-drover](https://github.com/hdrover/discord-drover)'s proxy mode.
+
+### 1. Configure
+
+Edit `/etc/discord-wrangler/discord-wrangler.conf`:
+
+```ini
+[wrangler]
+proxy       = socks5://user:password@your-proxy:1080
+relay_port  = 41080
+discord_uid = 1000   ; run `id -u` to find your UID
+```
+
+If `proxy` contains credentials, chmod the file:
+
+```sh
+sudo chmod 0600 /etc/discord-wrangler/discord-wrangler.conf
+```
+
+Then restart the daemon:
+
+```sh
+sudo systemctl restart discord-wrangler
+```
+
+### 2. Launch Discord via the wrapper
+
+```sh
+discord-wrangler-launch    # instead of `discord`
+```
+
+This places Discord inside a known cgroup v2 scope. The daemon's nftables rule matches that cgroup and redirects all of Discord's TCP to the in-daemon relay, which tunnels it through the configured upstream proxy.
+
+If you launch Discord directly without the wrapper, the daemon still does the UDP voice bypass — only the TCP proxy is skipped.
+
+### Supported proxy schemes
+
+| Scheme | Auth |
+|---|---|
+| `socks5://host:port` | none |
+| `socks5://user:pass@host:port` | username/password (RFC 1929) |
+| `http://host:port` | none (HTTP/1.1 CONNECT) |
+| `http://user:pass@host:port` | Basic |
+
 ## Uninstall
 
 ```sh
@@ -94,6 +140,23 @@ sudo tests/integration/test_nft.sh      # nftables rule lifecycle
 ```
 
 The two integration tests need sudo because raw sockets and netfilter rules do. The actual proof point is `tests/MANUAL.md` — running it against real Discord on the affected network.
+
+### Optional integration test fixtures
+
+The proxy-mode integration tests use external proxy implementations as fixtures.
+Install on demand:
+
+- Debian/Ubuntu: `sudo apt install tinyproxy microsocks`
+- Arch/CachyOS:  `sudo pacman -S tinyproxy`, `microsocks` via AUR
+- Fallback for SOCKS5: `ssh -D 1080 -N localhost` works when neither is available.
+
+Run them:
+
+```sh
+bash tests/integration/test_relay.sh                   # unprivileged
+bash tests/integration/test_relay_http.sh              # unprivileged
+sudo bash tests/integration/test_cgroup_redirect.sh    # sudo (real netfilter)
+```
 
 ## Credits
 
