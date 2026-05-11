@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace wrangler::inject {
+namespace wrangler::direct::inject {
 
 // Initializes the raw socket. Returns 0 on success, negative errno on failure.
 // Must be called once at daemon start. Requires CAP_NET_RAW.
@@ -18,4 +18,4 @@ int send_udp(uint32_t src_addr, uint16_t src_port,
 
 void shutdown();
 
-} // namespace wrangler::inject
+} // namespace wrangler::direct::inject

@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <fstream>
 
-namespace wrangler::packet_file {
+namespace wrangler::direct::packet_file {
 
 static std::optional<std::string> env(const char* name) {
     const char* v = ::getenv(name);
@@ -39,4 +39,4 @@ std::vector<uint8_t> read(const std::string& path) {
     return out;
 }
 
-} // namespace wrangler::packet_file
+} // namespace wrangler::direct::packet_file

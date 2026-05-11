@@ -2,7 +2,7 @@
 // Usage: inject_driver <src_addr> <src_port> <dst_addr> <dst_port> <payload_hex>
 // Example: inject_driver 127.0.0.1 40000 127.0.0.1 50000 deadbeef
 
-#include "inject.hpp"
+#include "direct/inject.hpp"
 
 #include <arpa/inet.h>
 #include <cstdio>
@@ -29,10 +29,10 @@ int main(int argc, char** argv) {
     uint16_t dp = static_cast<uint16_t>(std::atoi(argv[4]));
     auto bytes = hex_to_bytes(argv[5]);
 
-    if (wrangler::inject::init() < 0) return 1;
-    int r = wrangler::inject::send_udp(s.s_addr, htons(sp), d.s_addr, htons(dp),
+    if (wrangler::direct::inject::init() < 0) return 1;
+    int r = wrangler::direct::inject::send_udp(s.s_addr, htons(sp), d.s_addr, htons(dp),
                                        bytes.data(), bytes.size());
-    wrangler::inject::shutdown();
+    wrangler::direct::inject::shutdown();
     std::fprintf(stdout, "send_udp returned %d\n", r);
     return r > 0 ? 0 : 1;
 }

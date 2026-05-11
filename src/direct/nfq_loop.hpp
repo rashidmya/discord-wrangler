@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace wrangler::nfq {
+namespace wrangler::direct::nfq {
 
 // Callback receives a parsed IPv4 UDP first-packet of a new flow. Implementation
 // must call `release()` exactly once (any thread) to ACK the packet to the kernel.
@@ -28,4 +28,4 @@ int run();
 // Wake the loop and exit. Safe from a signal handler.
 void shutdown();
 
-} // namespace wrangler::nfq
+} // namespace wrangler::direct::nfq

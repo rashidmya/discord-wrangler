@@ -15,7 +15,7 @@
 #include <atomic>
 #include <vector>
 
-namespace wrangler::nfq {
+namespace wrangler::direct::nfq {
 
 namespace {
 mnl_socket*           s_nl   = nullptr;
@@ -176,4 +176,4 @@ void shutdown() {
     }
 }
 
-} // namespace wrangler::nfq
+} // namespace wrangler::direct::nfq

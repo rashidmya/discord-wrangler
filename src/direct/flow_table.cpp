@@ -2,7 +2,7 @@
 
 #include <time.h>
 
-namespace wrangler {
+namespace wrangler::direct {
 
 FlowTable::FlowTable() = default;
 FlowTable::~FlowTable() = default;
@@ -42,4 +42,4 @@ bool FlowTable::consume_first(const Tuple& tuple) {
     return false;
 }
 
-} // namespace wrangler
+} // namespace wrangler::direct

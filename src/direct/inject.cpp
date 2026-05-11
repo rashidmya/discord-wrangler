@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace wrangler::inject {
+namespace wrangler::direct::inject {
 
 namespace {
 int s_raw_fd = -1;
@@ -120,4 +120,4 @@ int send_udp(uint32_t src_addr, uint16_t src_port,
     return static_cast<int>(r);
 }
 
-} // namespace wrangler::inject
+} // namespace wrangler::direct::inject

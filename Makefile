@@ -16,7 +16,11 @@ BUILD      := build
 DAEMON     := $(BUILD)/discord-wranglerd
 
 # Source files are added per-task — start with just main.cpp.
-SRCS       := src/main.cpp src/inject.cpp src/flow_table.cpp src/nfq_loop.cpp src/packet_file.cpp
+SRCS       := src/main.cpp \
+              src/direct/inject.cpp \
+              src/direct/flow_table.cpp \
+              src/direct/nfq_loop.cpp \
+              src/direct/packet_file.cpp
 OBJS       := $(SRCS:%.cpp=$(BUILD)/%.o)
 
 .PHONY: all clean
@@ -49,11 +53,11 @@ test-integration: $(DAEMON)
 run-test-%: $(TEST_BUILD)/%_test
 	$<
 
-$(TEST_BUILD)/packet_file_test: tests/unit/packet_file_test.cpp tests/unit/main_test.cpp src/packet_file.cpp
+$(TEST_BUILD)/packet_file_test: tests/unit/packet_file_test.cpp tests/unit/main_test.cpp src/direct/packet_file.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) -Isrc -Itests/unit $^ -o $@
 
-$(TEST_BUILD)/flow_table_test: tests/unit/flow_table_test.cpp tests/unit/main_test.cpp src/flow_table.cpp
+$(TEST_BUILD)/flow_table_test: tests/unit/flow_table_test.cpp tests/unit/main_test.cpp src/direct/flow_table.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) -Isrc -Itests/unit $^ -lpthread -o $@
 
@@ -110,7 +114,7 @@ uninstall:
 	@echo "Uninstall complete (note: discord-wrangler user kept; remove with: sudo userdel discord-wrangler)"
 
 # ---- integration helpers ----
-$(BUILD)/inject_driver: tests/integration/inject_driver.cpp src/inject.cpp
+$(BUILD)/inject_driver: tests/integration/inject_driver.cpp src/direct/inject.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXSTD) -O0 -g -Wall -Wextra -Isrc $^ -o $@
 

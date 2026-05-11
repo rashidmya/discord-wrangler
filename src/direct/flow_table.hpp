@@ -4,7 +4,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace wrangler {
+namespace wrangler::direct {
 
 class FlowTable {
 public:
@@ -60,4 +60,4 @@ private:
     static int64_t real_now_ms();
 };
 
-} // namespace wrangler
+} // namespace wrangler::direct

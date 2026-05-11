@@ -1,7 +1,7 @@
 #include "doctest.h"
-#include "flow_table.hpp"
+#include "direct/flow_table.hpp"
 
-using namespace wrangler;
+using namespace wrangler::direct;
 
 namespace {
 FlowTable::Tuple t(uint8_t proto, uint32_t src, uint16_t sport, uint32_t dst, uint16_t dport) {

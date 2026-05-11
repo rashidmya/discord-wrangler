@@ -1,11 +1,11 @@
 // discord-wranglerd — NFQUEUE daemon entry.
 
 #include "config.hpp"
-#include "flow_table.hpp"
-#include "inject.hpp"
+#include "direct/flow_table.hpp"
+#include "direct/inject.hpp"
 #include "log.hpp"
-#include "nfq_loop.hpp"
-#include "packet_file.hpp"
+#include "direct/nfq_loop.hpp"
+#include "direct/packet_file.hpp"
 
 #include <arpa/inet.h>      // ntohl, ntohs
 #include <netinet/in.h>     // IPPROTO_UDP
@@ -20,7 +20,7 @@ std::atomic<bool> g_terminate{false};
 
 void on_signal(int) {
     g_terminate.store(true);
-    wrangler::nfq::shutdown();
+    wrangler::direct::nfq::shutdown();
 }
 
 void install_signal_handlers() {
@@ -45,20 +45,20 @@ int main(int /*argc*/, char** /*argv*/) {
 
     install_signal_handlers();
 
-    if (int r = wrangler::inject::init(); r < 0) {
+    if (int r = wrangler::direct::inject::init(); r < 0) {
         WLOG_ERROR("inject init failed (%d) — daemon cannot manipulate; exiting", r);
         return 1;
     }
 
-    wrangler::FlowTable flows;
+    wrangler::direct::FlowTable flows;
 
-    auto handler = [&cfg, &flows](wrangler::nfq::PacketEvent&& ev) {
+    auto handler = [&cfg, &flows](wrangler::direct::nfq::PacketEvent&& ev) {
         // Only manipulate when:
         //   - UDP payload length matches our target
         //   - first time we've seen this 5-tuple
         bool should_manipulate = (ev.udp_payload_len == cfg.first_len);
         if (should_manipulate) {
-            wrangler::FlowTable::Tuple t{
+            wrangler::direct::FlowTable::Tuple t{
                 IPPROTO_UDP, ev.src_addr, ev.src_port, ev.dst_addr, ev.dst_port};
             should_manipulate = flows.consume_first(t);
         }
@@ -75,9 +75,9 @@ int main(int /*argc*/, char** /*argv*/) {
 
         // Optional packet-file payload first
         if (!cfg.packet_file.empty()) {
-            auto bytes = wrangler::packet_file::read(cfg.packet_file);
+            auto bytes = wrangler::direct::packet_file::read(cfg.packet_file);
             if (!bytes.empty()) {
-                int r = wrangler::inject::send_udp(
+                int r = wrangler::direct::inject::send_udp(
                     ev.src_addr, ev.src_port, ev.dst_addr, ev.dst_port,
                     bytes.data(), bytes.size());
                 WLOG_DEBUG("packet-file probe (%zu B) -> %d", bytes.size(), r);
@@ -86,9 +86,9 @@ int main(int /*argc*/, char** /*argv*/) {
 
         // 0x00 probe, then 0x01 probe
         const uint8_t p0 = 0x00, p1 = 0x01;
-        int r0 = wrangler::inject::send_udp(ev.src_addr, ev.src_port,
+        int r0 = wrangler::direct::inject::send_udp(ev.src_addr, ev.src_port,
                                             ev.dst_addr, ev.dst_port, &p0, 1);
-        int r1 = wrangler::inject::send_udp(ev.src_addr, ev.src_port,
+        int r1 = wrangler::direct::inject::send_udp(ev.src_addr, ev.src_port,
                                             ev.dst_addr, ev.dst_port, &p1, 1);
         WLOG_DEBUG("probe 0x00 -> %d, 0x01 -> %d", r0, r1);
 
@@ -101,15 +101,15 @@ int main(int /*argc*/, char** /*argv*/) {
         }).detach();
     };
 
-    if (int r = wrangler::nfq::init(cfg.queue_num, handler); r < 0) {
+    if (int r = wrangler::direct::nfq::init(cfg.queue_num, handler); r < 0) {
         WLOG_ERROR("nfq init failed: %d", r);
-        wrangler::inject::shutdown();
+        wrangler::direct::inject::shutdown();
         return 1;
     }
 
-    int rc = wrangler::nfq::run();
+    int rc = wrangler::direct::nfq::run();
 
     WLOG_INFO("shutting down");
-    wrangler::inject::shutdown();
+    wrangler::direct::inject::shutdown();
     return rc == 0 ? 0 : 1;
 }
