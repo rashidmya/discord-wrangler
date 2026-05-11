@@ -1,0 +1,8 @@
+build/
+*.o
+*.swp
+*~
+.DS_Store
+core
+core.*
+docs/

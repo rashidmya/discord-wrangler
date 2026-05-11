@@ -1,0 +1,17 @@
+# discord-wrangler nftables rule.
+# Installed at /etc/nftables.d/discord-wrangler.nft.
+# Loaded atomically by the systemd unit's ExecStartPre, removed on stop.
+
+table inet discord_wrangler {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Outgoing IPv4 UDP, payload length 74 bytes (UDP length = 82),
+        # first packet of a new flow → queue to userspace, bypass on no daemon.
+        meta nfproto ipv4 \
+          meta l4proto udp \
+          udp length 82 \
+          ct state new \
+          queue num @QUEUE_NUM@ bypass
+    }
+}
