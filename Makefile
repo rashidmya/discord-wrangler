@@ -22,6 +22,7 @@ SRCS       := src/main.cpp \
               src/proxy/client.cpp \
               src/proxy/cgroup.cpp \
               src/proxy/relay.cpp \
+              src/proxy/nft.cpp \
               src/direct/inject.cpp \
               src/direct/flow_table.cpp \
               src/direct/nfq_loop.cpp \
@@ -113,6 +114,8 @@ install: $(DAEMON)
 	sed -e 's|@QUEUE_NUM@|$(QUEUE_NUM)|g' share/discord-wrangler.nft.in \
 	  > "$(NFTRULES_DIR)/discord-wrangler.nft"
 	chmod 0644 "$(NFTRULES_DIR)/discord-wrangler.nft"
+	install -m 0644 share/discord-wrangler-proxy.nft.in \
+	    "$(NFTRULES_DIR)/discord-wrangler-proxy.nft.in"
 	@if [ -z "$(DESTDIR)" ]; then \
 	    systemd-sysusers && \
 	    systemctl daemon-reload && \
@@ -132,6 +135,8 @@ uninstall:
 	-rm -f "$(UNITDIR_INST)/discord-wrangler.service"
 	-rm -f "$(SYSUSERS_INST)/discord-wrangler.conf"
 	-rm -f "$(NFTRULES_DIR)/discord-wrangler.nft"
+	-rm -f "$(NFTRULES_DIR)/discord-wrangler-proxy.nft.in"
+	-nft delete table inet discord_wrangler_proxy 2>/dev/null
 	-rm -f "$(SBINDIR_INST)/discord-wranglerd"
 	-rm -rf "$(DOCDIR_INST)"
 	-systemctl daemon-reload
