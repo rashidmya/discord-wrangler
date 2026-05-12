@@ -15,6 +15,23 @@ namespace wrangler::proxy::client {
 
 namespace {
 
+// SOCKS5 protocol constants (RFC 1928 / RFC 1929).
+constexpr uint8_t SOCKS5_VER             = 0x05;
+constexpr uint8_t SOCKS5_METHOD_NO_AUTH  = 0x00;
+constexpr uint8_t SOCKS5_METHOD_USER_PWD = 0x02;
+constexpr uint8_t SOCKS5_METHOD_NONE     = 0xff;
+constexpr uint8_t SOCKS5_CMD_CONNECT     = 0x01;
+constexpr uint8_t SOCKS5_RSV             = 0x00;
+constexpr uint8_t SOCKS5_ATYP_IPV4       = 0x01;
+constexpr uint8_t SOCKS5_ATYP_DOMAIN     = 0x03;
+constexpr uint8_t SOCKS5_ATYP_IPV6       = 0x04;
+constexpr uint8_t SOCKS5_REP_OK          = 0x00;
+constexpr uint8_t SOCKS5_AUTH_VER        = 0x01;
+constexpr uint8_t SOCKS5_AUTH_OK         = 0x00;
+constexpr size_t  SOCKS5_AUTH_FIELD_MAX  = 255;
+
+constexpr size_t  HTTP_CONNECT_HEADERS_MAX = 8192;
+
 int write_all(int fd, const void* buf, size_t n) {
     const auto* p = static_cast<const uint8_t*>(buf);
     while (n) {
@@ -86,35 +103,36 @@ int handshake_socks5(int fd, const OrigDst& dst,
 
     // 1. Greeting.
     if (with_auth) {
-        uint8_t g[] = {0x05, 0x02, 0x00, 0x02};
+        uint8_t g[] = {SOCKS5_VER, 0x02, SOCKS5_METHOD_NO_AUTH, SOCKS5_METHOD_USER_PWD};
         if (int r = write_all(fd, g, sizeof(g))) return r;
     } else {
-        uint8_t g[] = {0x05, 0x01, 0x00};
+        uint8_t g[] = {SOCKS5_VER, 0x01, SOCKS5_METHOD_NO_AUTH};
         if (int r = write_all(fd, g, sizeof(g))) return r;
     }
 
     uint8_t method_reply[2];
     if (int r = read_all(fd, method_reply, 2)) return r;
-    if (method_reply[0] != 0x05) {
+    if (method_reply[0] != SOCKS5_VER) {
         WLOG_WARN("socks5: bad version in method reply: 0x%02x", method_reply[0]);
         return -EPROTO;
     }
-    if (method_reply[1] == 0xff) {
+    if (method_reply[1] == SOCKS5_METHOD_NONE) {
         WLOG_WARN("socks5: server rejects offered methods (no-auth%s)",
                   with_auth ? " or user/pass" : "");
         return -EACCES;
     }
-    if (method_reply[1] == 0x02) {
+    if (method_reply[1] == SOCKS5_METHOD_USER_PWD) {
         if (!with_auth) {
             WLOG_WARN("socks5: server demands user/pass but none configured");
             return -EACCES;
         }
-        if (user.size() > 255 || pass.size() > 255) {
-            WLOG_WARN("socks5: user or pass exceeds 255 bytes (RFC 1929 limit)");
+        if (user.size() > SOCKS5_AUTH_FIELD_MAX || pass.size() > SOCKS5_AUTH_FIELD_MAX) {
+            WLOG_WARN("socks5: user or pass exceeds %zu bytes (RFC 1929 limit)",
+                      SOCKS5_AUTH_FIELD_MAX);
             return -EINVAL;
         }
         std::vector<uint8_t> auth;
-        auth.push_back(0x01);
+        auth.push_back(SOCKS5_AUTH_VER);
         auth.push_back(static_cast<uint8_t>(user.size()));
         auth.insert(auth.end(), user.begin(), user.end());
         auth.push_back(static_cast<uint8_t>(pass.size()));
@@ -123,11 +141,11 @@ int handshake_socks5(int fd, const OrigDst& dst,
 
         uint8_t auth_reply[2];
         if (int r = read_all(fd, auth_reply, 2)) return r;
-        if (auth_reply[0] != 0x01 || auth_reply[1] != 0x00) {
+        if (auth_reply[0] != SOCKS5_AUTH_VER || auth_reply[1] != SOCKS5_AUTH_OK) {
             WLOG_ERROR("socks5: user/pass auth rejected (status=0x%02x)", auth_reply[1]);
             return -EACCES;
         }
-    } else if (method_reply[1] != 0x00) {
+    } else if (method_reply[1] != SOCKS5_METHOD_NO_AUTH) {
         WLOG_WARN("socks5: unexpected method 0x%02x", method_reply[1]);
         return -EPROTO;
     }
@@ -136,14 +154,14 @@ int handshake_socks5(int fd, const OrigDst& dst,
     // to avoid spurious -Warray-bounds in -O2 across initializer-list + push_back.
     std::vector<uint8_t> req;
     req.reserve(22);
-    req.push_back(0x05);
-    req.push_back(0x01);
-    req.push_back(0x00);
+    req.push_back(SOCKS5_VER);
+    req.push_back(SOCKS5_CMD_CONNECT);
+    req.push_back(SOCKS5_RSV);
     if (dst.family == AF_INET) {
-        req.push_back(0x01);
+        req.push_back(SOCKS5_ATYP_IPV4);
         req.insert(req.end(), dst.addr, dst.addr + 4);
     } else if (dst.family == AF_INET6) {
-        req.push_back(0x04);
+        req.push_back(SOCKS5_ATYP_IPV6);
         req.insert(req.end(), dst.addr, dst.addr + 16);
     } else {
         return -EAFNOSUPPORT;
@@ -156,17 +174,20 @@ int handshake_socks5(int fd, const OrigDst& dst,
     // 3. Reply.
     uint8_t hdr[4];
     if (int r = read_all(fd, hdr, 4)) return r;
-    if (hdr[0] != 0x05) { WLOG_WARN("socks5: bad ver in reply: 0x%02x", hdr[0]); return -EPROTO; }
-    if (hdr[1] != 0x00) {
+    if (hdr[0] != SOCKS5_VER) {
+        WLOG_WARN("socks5: bad ver in reply: 0x%02x", hdr[0]);
+        return -EPROTO;
+    }
+    if (hdr[1] != SOCKS5_REP_OK) {
         WLOG_WARN("socks5: CONNECT failed (rep=0x%02x)", hdr[1]);
         return -ECONNREFUSED;
     }
     // Drain BND.ADDR + BND.PORT based on atyp.
     size_t addr_len = 0;
     switch (hdr[3]) {
-        case 0x01: addr_len = 4;  break;
-        case 0x04: addr_len = 16; break;
-        case 0x03: {
+        case SOCKS5_ATYP_IPV4:   addr_len = 4;  break;
+        case SOCKS5_ATYP_IPV6:   addr_len = 16; break;
+        case SOCKS5_ATYP_DOMAIN: {
             uint8_t l = 0;
             if (int r = read_all(fd, &l, 1)) return r;
             addr_len = l;
@@ -203,8 +224,9 @@ int handshake_http_connect(int fd, const OrigDst& dst,
         if (r < 0) { if (errno == EINTR) continue; return -errno; }
         if (r == 0) return -EPIPE;
         buf += c;
-        if (buf.size() > 8192) {
-            WLOG_WARN("http_connect: response headers exceed 8 KiB; bailing");
+        if (buf.size() > HTTP_CONNECT_HEADERS_MAX) {
+            WLOG_WARN("http_connect: response headers exceed %zu bytes; bailing",
+                      HTTP_CONNECT_HEADERS_MAX);
             return -EMSGSIZE;
         }
         if (buf.size() >= 4 && buf.compare(buf.size()-4, 4, "\r\n\r\n") == 0) break;

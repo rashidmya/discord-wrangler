@@ -9,6 +9,9 @@ namespace wrangler::log {
 
 enum class Level : int { Debug = 0, Info = 1, Warn = 2, Error = 3 };
 
+// Set once by main() (before any worker thread is spawned) via
+// set_level_from_env(). After that the value is read-only, so plain
+// non-atomic access is safe.
 inline Level g_level = Level::Info;
 
 inline void set_level_from_env() {
@@ -30,6 +33,7 @@ inline const char* prefix(Level l) {
     return "[?] ";
 }
 
+__attribute__((format(printf, 2, 3)))
 inline void logf(Level l, const char* fmt, ...) {
     if (static_cast<int>(l) < static_cast<int>(g_level)) return;
     std::fputs(prefix(l), stderr);

@@ -7,10 +7,15 @@
 namespace wrangler::proxy::url {
 namespace {
 
+// Reject embedded NUL anywhere in user/pass: the HTTP CONNECT path forms
+// "user:pass" and base64-encodes it, so a smuggled NUL would silently mangle
+// the auth header. SOCKS5 uses length-prefixed fields and would tolerate it,
+// but uniform rejection keeps the parser predictable.
 std::optional<std::string> percent_decode(const std::string& s) {
     std::string out;
     out.reserve(s.size());
     for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\0') return std::nullopt;
         if (s[i] != '%') { out += s[i]; continue; }
         if (i + 2 >= s.size()) return std::nullopt;
         auto hex = [](char c) -> int {
@@ -21,7 +26,9 @@ std::optional<std::string> percent_decode(const std::string& s) {
         };
         int hi = hex(s[i+1]), lo = hex(s[i+2]);
         if (hi < 0 || lo < 0) return std::nullopt;
-        out += static_cast<char>((hi << 4) | lo);
+        char decoded = static_cast<char>((hi << 4) | lo);
+        if (decoded == '\0') return std::nullopt;
+        out += decoded;
         i += 2;
     }
     return out;

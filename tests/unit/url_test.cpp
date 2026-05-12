@@ -91,3 +91,10 @@ TEST_CASE("url: unterminated IPv6 bracket rejected") {
     // and accept the input as valid.
     CHECK_FALSE(url::parse("socks5://[::1@host:1080").has_value());
 }
+
+TEST_CASE("url: NUL in percent-decoded credentials rejected") {
+    // %00 would smuggle a NUL into "user:pass", which the HTTP CONNECT path
+    // base64-encodes whole — silently truncating the credential payload.
+    CHECK_FALSE(url::parse("http://us%00er:pass@host:8080").has_value());
+    CHECK_FALSE(url::parse("http://user:pa%00ss@host:8080").has_value());
+}

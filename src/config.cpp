@@ -1,26 +1,33 @@
 #include "config.hpp"
+#include "log.hpp"
 
+#include <charconv>
 #include <climits>
 #include <cstdlib>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <unordered_map>
 
 namespace wrangler::config {
 namespace {
 
-uint32_t parse_u32(const char* v, uint32_t fallback) {
-    if (!v || !*v) return fallback;
-    char* end = nullptr;
-    long x = std::strtol(v, &end, 10);
-    if (end == v || x < 0 || x > static_cast<long>(UINT32_MAX)) return fallback;
-    return static_cast<uint32_t>(x);
-}
-
-uint32_t parse_u32(const std::string& v, uint32_t fallback) {
-    return v.empty() ? fallback : parse_u32(v.c_str(), fallback);
+// Parse a decimal uint32 from `v`. On empty/unparseable/out-of-range input,
+// warn (mentioning `key` for diagnostic context) and return `fallback`.
+uint32_t parse_u32(std::string_view key, std::string_view v, uint32_t fallback) {
+    if (v.empty()) return fallback;
+    uint32_t out = 0;
+    auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), out, 10);
+    if (ec != std::errc{} || ptr != v.data() + v.size()) {
+        WLOG_WARN("config: %.*s=%.*s is not a valid uint32; using default %u",
+                  static_cast<int>(key.size()), key.data(),
+                  static_cast<int>(v.size()), v.data(),
+                  fallback);
+        return fallback;
+    }
+    return out;
 }
 
 std::string trim(const std::string& s) {
@@ -117,13 +124,23 @@ Config from_env() {
     relay_port_s  = env_or("WRANGLER_RELAY_PORT",  relay_port_s);
     discord_uid_s = env_or("WRANGLER_DISCORD_UID", discord_uid_s);
 
-    c.queue_num   = static_cast<uint16_t>(parse_u32(queue_num_s, c.queue_num));
-    c.first_len   = static_cast<uint16_t>(parse_u32(first_len_s, c.first_len));
-    c.hold_ms     = parse_u32(hold_ms_s, c.hold_ms);
+    auto parse_u16 = [](std::string_view key, std::string_view v, uint16_t fb) {
+        uint32_t x = parse_u32(key, v, fb);
+        if (x > UINT16_MAX) {
+            WLOG_WARN("config: %.*s=%u exceeds uint16 range; using default %u",
+                      static_cast<int>(key.size()), key.data(), x, fb);
+            return fb;
+        }
+        return static_cast<uint16_t>(x);
+    };
+
+    c.queue_num   = parse_u16("queue_num",   queue_num_s,   c.queue_num);
+    c.first_len   = parse_u16("first_len",   first_len_s,   c.first_len);
+    c.hold_ms     = parse_u32("hold_ms",     hold_ms_s,     c.hold_ms);
     c.packet_file = packet_file_s;
     c.proxy       = proxy_s;
-    c.relay_port  = static_cast<uint16_t>(parse_u32(relay_port_s, c.relay_port));
-    c.discord_uid = parse_u32(discord_uid_s, c.discord_uid);
+    c.relay_port  = parse_u16("relay_port",  relay_port_s,  c.relay_port);
+    c.discord_uid = parse_u32("discord_uid", discord_uid_s, c.discord_uid);
 
     // If proxy is set and the *file* (not env) contains a URL with creds, the
     // file must be 0600.
