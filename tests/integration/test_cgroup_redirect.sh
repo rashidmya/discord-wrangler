@@ -70,7 +70,7 @@ WRANGLER_DISCORD_UID=$USERID \
 WRANGLER_QUEUE_NUM=$TEST_QUEUE \
 WRANGLER_LOG_LEVEL=debug \
 WRANGLER_CONF_FILE=/dev/null \
-"$BIN" &
+"$BIN" > /tmp/cgroup_redirect_daemon.log 2>&1 &
 WRG_PID=$!
 
 cleanup() {
@@ -81,7 +81,7 @@ cleanup() {
         systemctl --user stop discord-wrangler-discord.scope 2>/dev/null || true
     nft delete table inet discord_wrangler_proxy 2>/dev/null || true
     rm -f /etc/nftables.d/discord-wrangler-proxy.nft.in
-    rm -f /tmp/cgroup_redirect_result
+    rm -f /tmp/cgroup_redirect_result /tmp/cgroup_redirect_daemon.log
 }
 trap cleanup EXIT
 
@@ -91,23 +91,47 @@ sleep 0.5
 # sudo — sudo strips arbitrary env vars by default (no sudoers whitelist
 # for DISCORD_BIN), so setting it before `sudo` fails silently and the
 # launcher runs the real Discord binary, which exits as a singleton.
+#
+# The leading `sleep 0.5` matters: it keeps the cgroup scope alive long
+# enough for the daemon's inotify watcher to react and for nft to stat
+# the scope path. With a fast `echo | nc` the scope can be torn down
+# before nft's rule load completes, causing ENOENT at the cgroupv2 path.
+# In real Discord usage the scope lives for hours, so this race is only
+# a test-fixture concern.
 chmod +x "$ROOT/share/discord-wrangler-launch"
 sudo -u "$USERNAME" \
     env XDG_RUNTIME_DIR=/run/user/$USERID DISCORD_BIN=/bin/sh \
     "$ROOT/share/discord-wrangler-launch" \
-    -c "echo hello | nc -w 2 127.0.0.1 $ECHO_PORT" \
+    -c "sleep 0.5 && echo hello | nc -w 2 127.0.0.1 $ECHO_PORT" \
     > /tmp/cgroup_redirect_result 2>&1 || true
 
 sleep 1.0
 
+# Catch the false-positive case where the nft rule never installed but
+# the direct loopback connection still echoed bytes through.
+if grep -q "nft install failed\|cgroupv2 path fails" /tmp/cgroup_redirect_daemon.log; then
+    echo "FAIL: nft rule never installed (cgroup match not active)"
+    echo "--- daemon log ---"
+    cat /tmp/cgroup_redirect_daemon.log >&2 || true
+    exit 1
+fi
+
+# Confirm the daemon actually saw the appearance and installed rules.
+grep -q "scope appeared -- installing rules" /tmp/cgroup_redirect_daemon.log || {
+    echo "FAIL: daemon never saw the cgroup scope"
+    cat /tmp/cgroup_redirect_daemon.log >&2 || true
+    exit 1
+}
+
 # The cgroup match should redirect to the relay; relay dials microsocks;
 # microsocks connects to the destination (127.0.0.1:$ECHO_PORT, which is
-# the Python echo server). The echo server echoes "hello" back. We expect
-# "hello" to appear in the captured output.
+# the Python echo server). The echo server echoes "hello" back.
 grep -q hello /tmp/cgroup_redirect_result || {
     echo "FAIL: expected hello to round-trip through redirect/relay/socks5/echo"
     echo "--- captured ---"
     cat /tmp/cgroup_redirect_result >&2 || true
+    echo "--- daemon log ---"
+    cat /tmp/cgroup_redirect_daemon.log >&2 || true
     echo "--- nft state ---"
     nft list table inet discord_wrangler_proxy >&2 || true
     exit 1
