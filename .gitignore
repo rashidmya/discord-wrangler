@@ -1,8 +1,28 @@
+# Build output
 build/
 *.o
+*.d
+*.a
+*.so
+*.so.*
+*.gcda
+*.gcno
+*.profraw
+coverage/
+compile_commands.json
+.cache/
+
+# Editors / IDEs
 *.swp
+*.swo
 *~
 .DS_Store
+.vscode/
+.idea/
+
+# Core dumps
 core
 core.*
+
+# Local agent / scratch state — not project docs.
 docs/

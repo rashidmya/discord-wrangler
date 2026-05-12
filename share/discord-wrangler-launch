@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# discord-wrangler-launch — run Discord inside a known cgroup v2 scope so
+# discord-wranglerd can match it via nftables.
+#
+# Usage: discord-wrangler-launch [args passed to Discord]
+#
+# Requires a running user systemd manager (systemctl --user). On a fresh
+# distro install or headless box, run:  loginctl enable-linger $USER
+set -eu
+
+if ! command -v systemd-run >/dev/null 2>&1; then
+    printf >&2 "discord-wrangler-launch: systemd-run not found\n"
+    exit 1
+fi
+
+if ! systemctl --user is-system-running >/dev/null 2>&1; then
+    if ! systemctl --user status >/dev/null 2>&1; then
+        printf >&2 "discord-wrangler-launch: no user systemd manager (try: loginctl enable-linger \$USER)\n"
+        exit 1
+    fi
+fi
+
+DISCORD_BIN="${DISCORD_BIN:-discord}"
+if ! command -v "$DISCORD_BIN" >/dev/null 2>&1; then
+    printf >&2 "discord-wrangler-launch: %s not found in PATH\n" "$DISCORD_BIN"
+    exit 1
+fi
+
+exec systemd-run --user --scope \
+    --unit=discord-wrangler-discord.scope \
+    --quiet \
+    -- "$DISCORD_BIN" "$@"

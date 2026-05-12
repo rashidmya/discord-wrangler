@@ -1,0 +1,15 @@
+# discord-wrangler proxy redirect rules.
+# Installed by the daemon at runtime when WRANGLER_PROXY is set.
+# Removed by the daemon on shutdown, and by ExecStopPost as a fallback.
+
+table inet discord_wrangler_proxy {
+    chain output {
+        type nat hook output priority dstnat; policy accept;
+
+        # Discord (running inside the discord-wrangler launcher's cgroup) has
+        # all outgoing TCP redirected to the loopback relay, both v4 and v6.
+        socket cgroupv2 level 5 "@CGROUP_PATH@" \
+          meta l4proto tcp \
+          redirect to :@RELAY_PORT@
+    }
+}

@@ -12,17 +12,19 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 PrivateDevices=true
 PrivateTmp=true
 RestrictNamespaces=true
-RestrictAddressFamilies=AF_INET AF_NETLINK
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 SystemCallFilter=@system-service ~@privileged
 Environment=WRANGLER_QUEUE_NUM=@QUEUE_NUM@
 Environment=WRANGLER_LOG_LEVEL=info
+ReadOnlyPaths=/sys/fs/cgroup
 ExecStartPre=/usr/sbin/nft -f /etc/nftables.d/discord-wrangler.nft
 ExecStart=@SBINDIR@/discord-wranglerd
 ExecStopPost=-/usr/sbin/nft delete table inet discord_wrangler
+ExecStopPost=-@SBINDIR@/discord-wrangler-cleanup
 Restart=on-failure
 RestartSec=5s
 

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace wrangler::packet_file {
+namespace wrangler::direct::packet_file {
 
 constexpr size_t MAX_BYTES = 65536;
 
@@ -18,4 +18,4 @@ std::optional<std::string> resolve_path();
 // (missing, oversized, permission denied, etc). Never throws.
 std::vector<uint8_t> read(const std::string& path);
 
-} // namespace wrangler::packet_file
+} // namespace wrangler::direct::packet_file

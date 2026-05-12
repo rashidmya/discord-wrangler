@@ -1,0 +1,37 @@
+# discord-wrangler — system-wide configuration.
+# Installed at /etc/discord-wrangler/discord-wrangler.conf
+# Edit, then restart:  sudo systemctl restart discord-wrangler
+#
+# Environment variables override these values: WRANGLER_PROXY,
+# WRANGLER_RELAY_PORT, WRANGLER_DISCORD_UID, WRANGLER_LOG_LEVEL, etc.
+
+[wrangler]
+
+# === Direct mode (UDP voice bypass) ===
+log_level    = info        ; debug | info | warn | error
+packet_file  =             ; path to custom probe payload, optional
+first_len    = 74          ; UDP payload length to match (bump if Discord changes proto)
+hold_ms      = 50          ; ms to hold the original packet after sending probes
+queue_num    = 0           ; NFQUEUE queue number; must match the nftables rule
+
+# === Proxy mode (TCP through HTTP/SOCKS5) ===
+# Leave `proxy` empty to disable proxy mode entirely (Direct mode only).
+#
+# Supported schemes:
+#   socks5://host:port
+#   socks5://user:password@host:port
+#   socks5h://host:port              (alias of socks5://)
+#   http://host:port                  (HTTP CONNECT)
+#   http://user:password@host:port    (HTTP CONNECT + Basic auth)
+#
+# If `proxy` contains credentials, this file MUST be mode 0600.
+# Run:  sudo chmod 0600 /etc/discord-wrangler/discord-wrangler.conf
+#
+# proxy = socks5://127.0.0.1:1080
+
+# Loopback port for the in-daemon TCP relay. Pick a free port in 40000-49999.
+relay_port   = 41080
+
+# UID of the user who runs Discord (required when `proxy` is set).
+# Find with:  id -u
+# discord_uid = 1000

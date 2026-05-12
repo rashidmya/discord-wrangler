@@ -1,11 +1,11 @@
 #include "doctest.h"
-#include "packet_file.hpp"
+#include "direct/packet_file.hpp"
 
 #include <stdlib.h>
 #include <string>
 #include <vector>
 
-using namespace wrangler;
+using namespace wrangler::direct;
 
 namespace {
 // RAII helper: set env vars and restore on destruction.

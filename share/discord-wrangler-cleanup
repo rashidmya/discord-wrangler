@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Called by systemd ExecStopPost to ensure the proxy redirect rule is gone
+# even if the daemon crashed without cleaning up. Idempotent.
+exec /usr/sbin/nft delete table inet discord_wrangler_proxy 2>/dev/null || true
