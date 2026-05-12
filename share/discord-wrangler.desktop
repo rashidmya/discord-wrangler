@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Discord Wrangler
-Comment=Discord through the wrangler proxy + UDP voice bypass
+Comment=Discord through the wrangler proxy
 TryExec=discord
 Exec=discord-wrangler-launch
 Icon=discord-wrangler

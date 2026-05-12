@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Discord Wrangler Canary
-Comment=Discord Canary through the wrangler proxy + UDP voice bypass
+Comment=Discord Canary through the wrangler proxy
 TryExec=discord-canary
 Exec=env DISCORD_BIN=discord-canary discord-wrangler-launch
 Icon=discord-wrangler
