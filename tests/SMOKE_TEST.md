@@ -56,10 +56,17 @@ ssh -i ~/.ssh/id_ed25519 -D 1080 -N root@178.128.161.97
 Verify it's live from Terminal B:
 
 ```sh
-curl --socks5 127.0.0.1:1080 https://api.discord.com/api/v9/gateway
+curl --socks5-hostname 127.0.0.1:1080 https://api.discord.com/api/v9/gateway
 ```
 
 You should see a JSON response. If not, fix the tunnel before continuing.
+
+`--socks5-hostname` (not `--socks5`) tells curl to push DNS resolution through the proxy rather than resolving locally — important if your local DNS is also blocked.
+
+**DNS prerequisite:** the daemon's proxy redirect works at the IP level (it intercepts `connect()`, not DNS lookups). Discord itself still has to resolve `api.discord.com` / `gateway.discord.gg` locally before it can call `connect()`. If your local DNS is blocked too, you'll need either:
+
+- System-wide DoH via systemd-resolved: edit `/etc/systemd/resolved.conf` to set `DNS=1.1.1.1#cloudflare-dns.com` and `DNSOverTLS=yes`, then `sudo systemctl restart systemd-resolved`.
+- A one-off `/etc/hosts` override using IPs from your VPS: `ssh -i ~/.ssh/id_ed25519 root@178.128.161.97 'getent hosts api.discord.com discord.com gateway.discord.gg'`.
 
 ### 1.2 Configure the daemon
 
