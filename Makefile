@@ -185,10 +185,12 @@ uninstall:
 	-rm -f "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-ptb.desktop"
 	-rm -f "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-canary.desktop"
 	-rm -f "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/discord-wrangler.png"
-	-command -v update-desktop-database >/dev/null 2>&1 && \
-	    update-desktop-database -q "$(PREFIX)/share/applications" || true
-	-command -v gtk-update-icon-cache >/dev/null 2>&1 && \
-	    gtk-update-icon-cache -q -t "$(PREFIX)/share/icons/hicolor" || true
+	@if [ -z "$(DESTDIR)" ]; then \
+	    command -v update-desktop-database >/dev/null 2>&1 && \
+	        update-desktop-database -q "$(PREFIX)/share/applications" || true; \
+	    command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+	        gtk-update-icon-cache -q -t "$(PREFIX)/share/icons/hicolor" || true; \
+	fi
 	@echo "(Note: $(SYSCONFDIR)/discord-wrangler/discord-wrangler.conf preserved if you customized it)"
 	-rm -f "$(SBINDIR_INST)/discord-wranglerd"
 	-rm -rf "$(DOCDIR_INST)"
