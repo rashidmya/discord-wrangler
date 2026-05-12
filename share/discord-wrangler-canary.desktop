@@ -3,7 +3,7 @@ Type=Application
 Name=Discord Wrangler Canary
 Comment=Discord Canary through the wrangler proxy + UDP voice bypass
 TryExec=discord-canary
-Exec=env DISCORD_BIN=discord-canary discord-wrangler-launch %U
+Exec=env DISCORD_BIN=discord-canary discord-wrangler-launch
 Icon=discord-wrangler
 Terminal=false
 Categories=Network;InstantMessaging;Chat;

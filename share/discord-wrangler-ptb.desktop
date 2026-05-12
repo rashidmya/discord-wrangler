@@ -3,7 +3,7 @@ Type=Application
 Name=Discord Wrangler PTB
 Comment=Discord PTB through the wrangler proxy + UDP voice bypass
 TryExec=discord-ptb
-Exec=env DISCORD_BIN=discord-ptb discord-wrangler-launch %U
+Exec=env DISCORD_BIN=discord-ptb discord-wrangler-launch
 Icon=discord-wrangler
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
