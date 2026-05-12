@@ -45,9 +45,12 @@ cleanup() {
 trap cleanup EXIT
 sleep 0.2
 
-# Echo server: serves one line via cat
+# Echo server: serves one line via cat.
+# Use positional `nc -l <host> <port>` syntax, which works on both OpenBSD
+# nc (Arch/CachyOS default) and nmap-ncat (apt: ncat). GNU netcat's `-l -p`
+# form does NOT work on OpenBSD nc.
 echo "hello-relay-test" > /tmp/relay_echo_in
-( $NC -l -p $ECHO_PORT < /tmp/relay_echo_in > /tmp/relay_echo_out ) &
+( $NC -l 127.0.0.1 $ECHO_PORT < /tmp/relay_echo_in > /tmp/relay_echo_out ) &
 ECHO_PID=$!
 sleep 0.2
 
