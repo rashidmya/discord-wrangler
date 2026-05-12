@@ -85,7 +85,8 @@ test: test-unit test-integration
 test-unit: $(addprefix run-test-,$(UNIT_TESTS))
 
 test-integration: $(DAEMON)
-	@echo "Integration tests require sudo (raw sockets, nftables). Run individually if needed:"
+	bash tests/integration/test_launch_gate.sh
+	@echo "Integration tests requiring sudo (raw sockets, nftables). Run individually if needed:"
 	@echo "  sudo tests/integration/test_inject.sh"
 	@echo "  sudo tests/integration/test_nft.sh"
 

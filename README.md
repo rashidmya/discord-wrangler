@@ -167,6 +167,7 @@ Install on demand:
 Run them:
 
 ```sh
+bash tests/integration/test_launch_gate.sh             # unprivileged
 bash tests/integration/test_relay.sh                   # unprivileged
 bash tests/integration/test_relay_http.sh              # unprivileged
 sudo bash tests/integration/test_cgroup_redirect.sh    # sudo (real netfilter)
