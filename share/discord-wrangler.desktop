@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Discord Wrangler
+Comment=Discord through the wrangler proxy + UDP voice bypass
+TryExec=discord
+Exec=discord-wrangler-launch %U
+Icon=discord-wrangler
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+StartupWMClass=discord
+Keywords=discord;chat;voice;proxy;wrangler;
