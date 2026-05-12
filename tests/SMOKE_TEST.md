@@ -48,7 +48,7 @@ Open a third terminal and leave it running for the whole SOCKS5 test:
 
 ```sh
 # Terminal C
-ssh -D 1080 -N your-vps
+ssh -i ~/.ssh/id_ed25519 -D 1080 -N root@178.128.161.97
 ```
 
 `-D 1080` makes ssh listen on `localhost:1080` and forward SOCKS5 through the remote box. `-N` = no remote command.
@@ -156,7 +156,7 @@ You need an HTTP CONNECT proxy somewhere reachable. Easiest: run `tinyproxy` on 
 ### 2.1 Set up tinyproxy on your VPS
 
 ```sh
-ssh your-vps
+ssh -i ~/.ssh/id_ed25519 root@178.128.161.97
 sudo apt install tinyproxy      # or pacman -S / dnf install
 sudo $EDITOR /etc/tinyproxy/tinyproxy.conf
 ```
@@ -182,7 +182,7 @@ sudo ufw allow 8888/tcp   # or however your firewall is set up
 Verify from your local box, Terminal B:
 
 ```sh
-curl -x http://your-vps-ip:8888 https://api.discord.com/api/v9/gateway
+curl -x http://178.128.161.97:8888 https://api.discord.com/api/v9/gateway
 ```
 
 You should see a JSON response.
@@ -196,10 +196,10 @@ sudo $EDITOR /etc/discord-wrangler/discord-wrangler.conf
 Change `proxy` to point at your tinyproxy:
 
 ```ini
-proxy = http://your-vps-ip:8888
+proxy = http://178.128.161.97:8888
 ```
 
-If you set up tinyproxy with username/password, use `http://user:pass@your-vps-ip:8888` and `sudo chmod 0600` the conf.
+If you set up tinyproxy with username/password, use `http://user:pass@178.128.161.97:8888` and `sudo chmod 0600` the conf.
 
 ### 2.3 Restart and verify
 
@@ -210,7 +210,7 @@ sudo systemctl restart discord-wrangler
 Terminal A should now show:
 
 ```
-relay: upstream proxy = http://your-vps-ip:8888
+relay: upstream proxy = http://178.128.161.97:8888
 ```
 
 ### 2.4 Launch and exercise
