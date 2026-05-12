@@ -1,37 +1,26 @@
 #include "proxy/relay.hpp"
 #include "proxy/client.hpp"
-#include "proxy/url.hpp"
-#include "proxy/rate_limit.hpp"
 #include "log.hpp"
 
 #include <algorithm>
 #include <arpa/inet.h>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <cstring>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <system_error>
-#include <thread>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <netdb.h>
-#include <poll.h>
 #include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6/ip6_tables.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <system_error>
+#include <unistd.h>
 
-namespace wrangler::proxy::relay {
+namespace wrangler::proxy {
+
 namespace {
-
-std::atomic<bool> g_running{false};
-int g_listen_v4 = -1;
-int g_listen_v6 = -1;
-std::thread g_accept_thread;
-std::atomic<int> g_inflight{0};
 
 int make_listener(int family, uint16_t port) {
     int fd = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
@@ -41,8 +30,8 @@ int make_listener(int family, uint16_t port) {
 
     if (family == AF_INET) {
         sockaddr_in a{};
-        a.sin_family = AF_INET;
-        a.sin_port   = htons(port);
+        a.sin_family      = AF_INET;
+        a.sin_port        = htons(port);
         a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         if (::bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) < 0) {
             int e = errno; ::close(fd); return -e;
@@ -64,14 +53,13 @@ int make_listener(int family, uint16_t port) {
     return fd;
 }
 
-// Resolve the original destination for a client_fd. Falls back to
-// WRANGLER_RELAY_FORCE_DST (test-only override; ignored if SO_ORIGINAL_DST
-// already succeeded).
+// Resolve the original destination for `client_fd`. Falls back to
+// $WRANGLER_RELAY_FORCE_DST (test-only override) if SO_ORIGINAL_DST is
+// unavailable.
 bool resolve_orig_dst(int client_fd, client::OrigDst& out) {
     sockaddr_storage ss{};
     socklen_t len = sizeof(ss);
 
-    // Try v4 first.
     if (::getsockopt(client_fd, SOL_IP, SO_ORIGINAL_DST, &ss, &len) == 0) {
         auto* a = reinterpret_cast<sockaddr_in*>(&ss);
         out.family = AF_INET;
@@ -79,7 +67,6 @@ bool resolve_orig_dst(int client_fd, client::OrigDst& out) {
         out.port = a->sin_port;
         return true;
     }
-    // Try v6.
     len = sizeof(ss);
     if (::getsockopt(client_fd, SOL_IPV6, IP6T_SO_ORIGINAL_DST, &ss, &len) == 0) {
         auto* a = reinterpret_cast<sockaddr_in6*>(&ss);
@@ -88,7 +75,6 @@ bool resolve_orig_dst(int client_fd, client::OrigDst& out) {
         out.port = a->sin6_port;
         return true;
     }
-    // Test override.
     if (const char* force = std::getenv("WRANGLER_RELAY_FORCE_DST")) {
         std::string s = force;
         auto colon = s.rfind(':');
@@ -157,8 +143,7 @@ void splice_both(int a, int b) {
                                  SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
             if (r <= 0) { eof = true; }
             else {
-                ssize_t w = ::splice(p1[0], nullptr, b, nullptr, r,
-                                     SPLICE_F_MOVE);
+                ssize_t w = ::splice(p1[0], nullptr, b, nullptr, r, SPLICE_F_MOVE);
                 if (w <= 0) eof = true;
             }
         }
@@ -167,8 +152,7 @@ void splice_both(int a, int b) {
                                  SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
             if (r <= 0) { eof = true; }
             else {
-                ssize_t w = ::splice(p2[0], nullptr, a, nullptr, r,
-                                     SPLICE_F_MOVE);
+                ssize_t w = ::splice(p2[0], nullptr, a, nullptr, r, SPLICE_F_MOVE);
                 if (w <= 0) eof = true;
             }
         }
@@ -180,134 +164,163 @@ void splice_both(int a, int b) {
     ::close(p2[0]); ::close(p2[1]);
 }
 
-// Module-level state for the upstream URL + rate limiter.
-url::ProxyUrl g_proxy_cfg{};
-RateLimiter g_log_limit{std::chrono::seconds(30)};
+} // namespace
 
-void handle_conn(int client_fd) {
-    auto on_exit = [&](int code) {
+Relay::~Relay() {
+    // Use a generous drain so detached handler threads aren't still touching
+    // member state when the object is destroyed. If they really do dangle,
+    // the OS reclaims fds on process exit; logging is best-effort.
+    stop(/*drain_timeout_ms=*/10000);
+}
+
+void Relay::handle_conn(int client_fd) {
+    auto on_exit = [&] {
         ::close(client_fd);
-        g_inflight.fetch_sub(1, std::memory_order_release);
-        (void)code;
+        inflight_.fetch_sub(1, std::memory_order_release);
     };
 
     client::OrigDst dst{};
     if (!resolve_orig_dst(client_fd, dst)) {
-        if (g_log_limit.allow("no-orig-dst")) {
+        if (log_limit_.allow("no-orig-dst")) {
             WLOG_WARN("relay: no SO_ORIGINAL_DST on connection -- dropping");
         }
-        return on_exit(-1);
+        on_exit();
+        return;
     }
 
-    int up = dial_upstream(g_proxy_cfg);
+    int up = dial_upstream(proxy_cfg_);
     if (up < 0) {
-        std::string key = "dial:" + g_proxy_cfg.host + ":" + std::to_string(g_proxy_cfg.port);
-        if (g_log_limit.allow(key)) {
+        std::string key = "dial:" + proxy_cfg_.host + ":" + std::to_string(proxy_cfg_.port);
+        if (log_limit_.allow(key)) {
             WLOG_WARN("relay: dial %s failed: %s",
-                      client::redact_url(g_proxy_cfg).c_str(), strerror(-up));
+                      client::redact_url(proxy_cfg_).c_str(), std::strerror(-up));
         }
-        return on_exit(up);
+        on_exit();
+        return;
     }
 
-    if (int r = client::handshake(up, dst, g_proxy_cfg); r != 0) {
-        if (g_log_limit.allow("handshake-err")) {
+    if (int r = client::handshake(up, dst, proxy_cfg_); r != 0) {
+        if (log_limit_.allow("handshake-err")) {
             WLOG_WARN("relay: handshake to %s failed: %s",
-                      client::redact_url(g_proxy_cfg).c_str(), strerror(-r));
+                      client::redact_url(proxy_cfg_).c_str(), std::strerror(-r));
         }
         ::close(up);
-        return on_exit(r);
+        on_exit();
+        return;
     }
 
     splice_both(client_fd, up);
     ::close(up);
-    on_exit(0);
+    on_exit();
 }
 
-void accept_loop() {
-    while (g_running.load(std::memory_order_acquire)) {
-        fd_set rs;
-        FD_ZERO(&rs);
-        int max = -1;
-        if (g_listen_v4 >= 0) { FD_SET(g_listen_v4, &rs); max = std::max(max, g_listen_v4); }
-        if (g_listen_v6 >= 0) { FD_SET(g_listen_v6, &rs); max = std::max(max, g_listen_v6); }
-        timeval tv{0, 200000};  // 200ms wakeup so we can re-check g_running
-        int r = ::select(max + 1, &rs, nullptr, nullptr, &tv);
+void Relay::accept_loop() {
+    pollfd pfds[3];
+    nfds_t npfds = 0;
+    if (listen_v4_ >= 0) { pfds[npfds++] = pollfd{listen_v4_, POLLIN, 0}; }
+    if (listen_v6_ >= 0) { pfds[npfds++] = pollfd{listen_v6_, POLLIN, 0}; }
+    pfds[npfds++] = pollfd{wake_rfd_, POLLIN, 0};
+
+    while (running_.load(std::memory_order_acquire)) {
+        for (nfds_t i = 0; i < npfds; ++i) pfds[i].revents = 0;
+        int r = ::poll(pfds, npfds, -1);
         if (r < 0) { if (errno == EINTR) continue; break; }
-        if (r == 0) continue;
-        for (int lf : {g_listen_v4, g_listen_v6}) {
-            if (lf < 0 || !FD_ISSET(lf, &rs)) continue;
+
+        // Wake fd? Drain it and exit when running_ flips.
+        if (pfds[npfds - 1].revents & POLLIN) {
+            char tmp[16];
+            while (::read(wake_rfd_, tmp, sizeof(tmp)) > 0) {}
+            continue;
+        }
+
+        for (nfds_t i = 0; i < npfds - 1; ++i) {
+            if (!(pfds[i].revents & POLLIN)) continue;
+            int lf = pfds[i].fd;
             while (true) {
                 int c = ::accept4(lf, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
                 if (c < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                     if (errno == EINTR) continue;
-                    WLOG_DEBUG("relay: accept: %s", strerror(errno));
+                    WLOG_DEBUG("relay: accept: %s", std::strerror(errno));
                     break;
                 }
-                g_inflight.fetch_add(1, std::memory_order_acq_rel);
+                inflight_.fetch_add(1, std::memory_order_acq_rel);
                 try {
-                    std::thread(handle_conn, c).detach();
+                    std::thread([this, c] { handle_conn(c); }).detach();
                 } catch (const std::system_error& e) {
-                    // pthread_create can fail under memory pressure or per-user
-                    // thread caps. Recover the fd and the in-flight count
-                    // rather than leaking either.
                     WLOG_WARN("relay: failed to spawn handler thread: %s", e.what());
                     ::close(c);
-                    g_inflight.fetch_sub(1, std::memory_order_release);
+                    inflight_.fetch_sub(1, std::memory_order_release);
                 }
             }
         }
     }
 }
 
-} // namespace
-
-int start(const wrangler::config::Config& cfg) {
+int Relay::start(const wrangler::config::Config& cfg) {
     auto parsed = url::parse(cfg.proxy);
     if (!parsed) {
-        // Don't log cfg.proxy here — an unparseable URL may still contain
-        // a recognizable user:pass@ segment we'd leak to the journal.
         WLOG_ERROR("relay: WRANGLER_PROXY value is unparseable (check scheme/host/port)");
         return -EINVAL;
     }
-    g_proxy_cfg = *parsed;
-    WLOG_INFO("relay: upstream proxy = %s", client::redact_url(g_proxy_cfg).c_str());
+    proxy_cfg_ = *parsed;
+    WLOG_INFO("relay: upstream proxy = %s", client::redact_url(proxy_cfg_).c_str());
 
-    g_listen_v4 = make_listener(AF_INET,  cfg.relay_port);
-    if (g_listen_v4 < 0) {
+    int wp[2];
+    if (::pipe2(wp, O_CLOEXEC | O_NONBLOCK) < 0) {
+        int e = errno;
+        WLOG_ERROR("relay: self-pipe pipe2: %s", std::strerror(e));
+        return -e;
+    }
+    wake_rfd_ = wp[0];
+    wake_wfd_ = wp[1];
+
+    listen_v4_ = make_listener(AF_INET, cfg.relay_port);
+    if (listen_v4_ < 0) {
+        int e = listen_v4_;
         WLOG_ERROR("relay: bind v4 :%u failed: %s",
-                   cfg.relay_port, strerror(-g_listen_v4));
-        return g_listen_v4;
+                   cfg.relay_port, std::strerror(-e));
+        ::close(wake_rfd_); ::close(wake_wfd_);
+        wake_rfd_ = wake_wfd_ = -1;
+        return e;
     }
-    g_listen_v6 = make_listener(AF_INET6, cfg.relay_port);
-    if (g_listen_v6 < 0) {
+    listen_v6_ = make_listener(AF_INET6, cfg.relay_port);
+    if (listen_v6_ < 0) {
         WLOG_WARN("relay: bind v6 :%u failed: %s (continuing with v4 only)",
-                  cfg.relay_port, strerror(-g_listen_v6));
-        g_listen_v6 = -1;
+                  cfg.relay_port, std::strerror(-listen_v6_));
+        listen_v6_ = -1;
     }
-    g_running.store(true, std::memory_order_release);
-    g_accept_thread = std::thread(accept_loop);
+    running_.store(true, std::memory_order_release);
+    accept_thread_ = std::thread([this] { accept_loop(); });
     WLOG_INFO("relay: listening on 127.0.0.1:%u%s",
-              cfg.relay_port, g_listen_v6 >= 0 ? " and [::1]" : "");
+              cfg.relay_port, listen_v6_ >= 0 ? " and [::1]" : "");
     return 0;
 }
 
-void stop(uint32_t drain_timeout_ms) {
-    g_running.store(false, std::memory_order_release);
-    if (g_listen_v4 >= 0) { ::shutdown(g_listen_v4, SHUT_RD); ::close(g_listen_v4); g_listen_v4 = -1; }
-    if (g_listen_v6 >= 0) { ::shutdown(g_listen_v6, SHUT_RD); ::close(g_listen_v6); g_listen_v6 = -1; }
-    if (g_accept_thread.joinable()) g_accept_thread.join();
+void Relay::stop(uint32_t drain_timeout_ms) {
+    if (!running_.exchange(false, std::memory_order_acq_rel)) return;
+
+    if (wake_wfd_ >= 0) {
+        const char b = 'x';
+        ssize_t n;
+        do { n = ::write(wake_wfd_, &b, 1); } while (n < 0 && errno == EINTR);
+    }
+    if (listen_v4_ >= 0) { ::shutdown(listen_v4_, SHUT_RD); ::close(listen_v4_); listen_v4_ = -1; }
+    if (listen_v6_ >= 0) { ::shutdown(listen_v6_, SHUT_RD); ::close(listen_v6_); listen_v6_ = -1; }
+    if (accept_thread_.joinable()) accept_thread_.join();
+    if (wake_rfd_ >= 0) { ::close(wake_rfd_); wake_rfd_ = -1; }
+    if (wake_wfd_ >= 0) { ::close(wake_wfd_); wake_wfd_ = -1; }
 
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(drain_timeout_ms);
-    while (g_inflight.load(std::memory_order_acquire) > 0 &&
+    while (inflight_.load(std::memory_order_acquire) > 0 &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    int rem = g_inflight.load(std::memory_order_acquire);
+    int rem = inflight_.load(std::memory_order_acquire);
     if (rem > 0) {
         WLOG_WARN("relay: %d in-flight connection(s) still active after drain", rem);
     }
 }
 
-} // namespace wrangler::proxy::relay
+} // namespace wrangler::proxy

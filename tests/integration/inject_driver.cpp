@@ -29,10 +29,10 @@ int main(int argc, char** argv) {
     uint16_t dp = static_cast<uint16_t>(std::atoi(argv[4]));
     auto bytes = hex_to_bytes(argv[5]);
 
-    if (wrangler::direct::inject::init() < 0) return 1;
-    int r = wrangler::direct::inject::send_udp(s.s_addr, htons(sp), d.s_addr, htons(dp),
-                                       bytes.data(), bytes.size());
-    wrangler::direct::inject::shutdown();
+    wrangler::direct::RawInjector injector;
+    if (injector.open() < 0) return 1;
+    int r = injector.send_udp(s.s_addr, htons(sp), d.s_addr, htons(dp),
+                              bytes.data(), bytes.size());
     std::fprintf(stdout, "send_udp returned %d\n", r);
     return r > 0 ? 0 : 1;
 }
