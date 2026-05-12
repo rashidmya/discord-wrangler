@@ -39,7 +39,8 @@ EOF
 chmod +x "$TMP"/systemctl "$TMP"/systemd-run "$TMP"/discord "$TMP"/discord-ptb "$TMP"/discord-canary
 
 run_launch() {
-    # $1 = conf path (or empty for unset)
+    # $1 = conf path; pass empty to simulate a missing conf file
+    #      (WRANGLER_CONF is set to /nonexistent/path, not unset).
     # Captures combined stdout+stderr; returns the wrapper's exit code.
     local conf="$1"
     local out
@@ -99,4 +100,4 @@ if [ $fail -ne 0 ]; then
     echo "FAIL"
     exit 1
 fi
-echo "OK"
+echo "PASS: proxy gate refuses missing/empty conf and proceeds with valid proxy"

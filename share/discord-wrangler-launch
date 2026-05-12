@@ -8,6 +8,24 @@
 # distro install or headless box, run:  loginctl enable-linger $USER
 set -eu
 
+# --- No-proxy gate ------------------------------------------------------------
+# Refuse to launch when no proxy is configured: with no proxy, this wrapper
+# is functionally identical to running Discord directly (the daemon-side UDP
+# voice bypass runs either way). Steer the user at the regular Discord entry.
+CONF="${WRANGLER_CONF:-/etc/discord-wrangler/discord-wrangler.conf}"
+proxy_val=""
+if [ -r "$CONF" ]; then
+    proxy_val=$(sed -n 's/^[[:space:]]*proxy[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$CONF" \
+        | head -n1 | sed 's/[[:space:]]*$//')
+fi
+if [ -z "$proxy_val" ]; then
+    MSG="No proxy configured in $CONF. The UDP voice bypass runs regardless — just open the regular Discord. Or set proxy = … in the conf and retry."
+    command -v notify-send >/dev/null 2>&1 && notify-send -u critical "Discord Wrangler" "$MSG" || true
+    printf >&2 "discord-wrangler-launch: %s\n" "$MSG"
+    exit 1
+fi
+# -----------------------------------------------------------------------------
+
 if ! command -v systemd-run >/dev/null 2>&1; then
     printf >&2 "discord-wrangler-launch: systemd-run not found\n"
     exit 1
