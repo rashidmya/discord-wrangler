@@ -1,18 +1,30 @@
 # discord-wrangler
 
-Fixes Discord voice chat on networks that block it (UAE residential ISPs, mainly), without a VPN or proxy.
+discord-wrangler is a Linux daemon that can force Discord to use a specified proxy server (HTTP or SOCKS5) for its TCP connections (chat, REST API, gateway, voice control). This may be necessary because the Discord client lacks proxy settings and ignores the system-wide proxy.
 
-It's a small daemon. When you join a voice channel, it injects two throwaway UDP packets onto the wire before Discord's first real voice packet goes out. That's enough to confuse the DPI box that signature-matches the 74-byte voice IP-discovery packet, so the connection completes and audio actually flows.
+Additionally, the daemon slightly modifies Discord's outgoing UDP traffic, which helps bypass some local restrictions on voice chats — UAE residential ISPs being the canonical case.
 
-Linux port of the Direct mode in [hdrover/discord-drover](https://github.com/hdrover/discord-drover) (Windows DLL). The Windows version hooks Winsock in-process via DLL detours. That doesn't translate to Linux because Discord's voice runtime (Chromium WebRTC, libuv, and increasingly Rust crates like rustix doing direct syscalls and io_uring) bypasses libc — so LD_PRELOAD can't see the relevant packets. This implementation runs in kernel space via nftables NFQUEUE instead, which catches the packet after it's been handed off no matter how it was submitted.
+The two pieces are independent. The UDP voice fix runs always. The TCP proxy redirect is opt-in via the conf file. If your network only DPI-blocks voice (the common case), no proxy is needed; if it also blocks Discord's TCP, configure a proxy and the daemon handles both.
+
+Linux equivalent of [hdrover/discord-drover](https://github.com/hdrover/discord-drover). The Windows version hooks Winsock in-process via DLL detours. That doesn't translate to Linux because Discord's voice runtime (Chromium WebRTC, libuv, and increasingly Rust crates like rustix doing direct syscalls and io_uring) bypasses libc — so LD_PRELOAD can't see the relevant packets. This implementation runs in kernel space via nftables NFQUEUE plus a small loopback TCP relay instead.
 
 ## How it works
+
+Two independent subsystems run inside the daemon. Both can be active at the same time.
+
+### UDP voice bypass (always on)
 
 Discord sends an outgoing UDP packet. An nftables rule on the OUTPUT chain matches "first packet of a new flow, UDP, payload exactly 74 bytes" and hands it off to the daemon. The daemon forges two small UDP packets with the same 5-tuple (so they look like part of the same flow), sends them via raw socket, waits 50 ms, then tells the kernel to release Discord's original packet.
 
 From the DPI's perspective, the first packet of the flow is now a 1-byte garbage packet instead of the recognizable IP-discovery one, and it lets the rest of the connection through.
 
-Nothing else changes. No proxy. No VPN. No kernel module. The daemon runs as a dedicated system user with `CAP_NET_ADMIN` and `CAP_NET_RAW` and no other privileges. If the daemon stops or crashes, the nftables rule has a `bypass` flag, so packets just pass through normally — Discord still works (voice will fail again on a blocked network, but nothing else breaks).
+No kernel module. The daemon runs as a dedicated system user with `CAP_NET_ADMIN` and `CAP_NET_RAW` and no other privileges. If the daemon stops or crashes, the nftables rule has a `bypass` flag, so packets just pass through normally — Discord still works for everything except voice on a blocked network.
+
+### TCP proxy redirect (opt-in, when `proxy =` is set)
+
+When the conf file has `proxy = socks5://…` or `proxy = http://…`, the daemon also stands up an in-process TCP relay on loopback and installs a second nftables rule that matches a specific cgroup. Discord is placed inside that cgroup by the `discord-wrangler-launch` wrapper; from inside the cgroup, all outgoing TCP gets redirected to the relay, which then tunnels each connection through the upstream proxy via SOCKS5 (RFC 1928/1929) or HTTP CONNECT.
+
+UDP voice does not go through the proxy — HTTP CONNECT is TCP-only by spec, and the SOCKS5 UDP path (`UDP ASSOCIATE`) is not implemented. The UDP probe trick above is the only thing handling UDP voice, with or without a proxy configured. The two subsystems handle different blocks: probes defeat the signature-match on the UDP IP-discovery packet; the proxy moves TCP through a server outside the blocked network.
 
 ## Install
 
@@ -77,9 +89,9 @@ Override the defaults with `sudo systemctl edit discord-wrangler` (creates a dro
 | `WRANGLER_HOLD_MS` | `50` | How long to delay Discord's original packet after sending the probes. |
 | `WRANGLER_QUEUE_NUM` | `0` | NFQUEUE queue number. Has to match the nftables rule. |
 
-## Proxy mode
+## Configuring the TCP proxy
 
-By default, discord-wrangler runs in "Direct mode" — fixes voice via UDP probes, leaves all TCP alone. If Discord's REST API and gateway (TCP) are also blocked on your network, enable Proxy mode to tunnel Discord's TCP through an HTTP or SOCKS5 proxy. This is the Linux equivalent of upstream [discord-drover](https://github.com/hdrover/discord-drover)'s proxy mode.
+Out of the box, only the UDP voice bypass is active and Discord's TCP goes direct. If your network also DPI-blocks Discord's TCP endpoints — chat, REST API, gateway, voice control — configure a proxy in the conf file and the daemon will tunnel Discord's TCP through it. The UDP voice bypass keeps running alongside, unchanged.
 
 ### 1. Configure
 
@@ -112,7 +124,7 @@ discord-wrangler-launch    # instead of `discord`
 
 This places Discord inside a known cgroup v2 scope. The daemon's nftables rule matches that cgroup and redirects all of Discord's TCP to the in-daemon relay, which tunnels it through the configured upstream proxy.
 
-If you launch Discord directly without the wrapper, the daemon still does the UDP voice bypass — only the TCP proxy is skipped.
+If you launch Discord without the wrapper, it ends up outside the cgroup and the TCP redirect doesn't apply. The UDP voice bypass still works — that's based on packet shape, not cgroup membership.
 
 ### Supported proxy schemes
 
@@ -160,6 +172,6 @@ sudo bash tests/integration/test_cgroup_redirect.sh    # sudo (real netfilter)
 
 ## Credits
 
-The Direct-mode concept and the specific 0x00 / 0x01 probe sequence are from [hdrover/discord-drover](https://github.com/hdrover/discord-drover). All credit for figuring out that the probe pattern works against this kind of DPI goes there.
+Both the UDP-probe trick (with the specific 0x00 / 0x01 byte sequence) and the TCP-through-proxy idea are from [hdrover/discord-drover](https://github.com/hdrover/discord-drover). All credit for figuring out the probe pattern against this kind of DPI goes there.
 
 doctest is vendored at `tests/unit/doctest.h` (MIT, by Viktor Kirilov).

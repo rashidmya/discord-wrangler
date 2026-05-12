@@ -173,11 +173,13 @@ Edit:
 ```
 Port 8888
 Listen 0.0.0.0
-Allow 0.0.0.0/0           # or restrict to your IP
-ConnectPort 443
-ConnectPort 80
+Allow 0.0.0.0/0           # or restrict to your home IP — see note below
 DisableViaHeader Yes
 ```
+
+**Important:** comment out (or delete) every `ConnectPort` line in the default config. Tinyproxy's behavior is "no `ConnectPort` directives ⇒ all ports allowed." If you leave the default `ConnectPort 443 / ConnectPort 563` lines in place, Discord's voice control socket on port 2087 will be rejected with HTTP 403 and voice will fail. Your firewall already restricts who can use the proxy, so opening all CONNECT ports is fine for personal use.
+
+The `Allow 0.0.0.0/0` line lets anyone use the proxy who can reach port 8888. Confirm your home public IP with `curl -s ifconfig.io` from the local machine and consider replacing `0.0.0.0/0` with that exact IP once the test passes. **Note:** `Allow 0.0.0.0` (without the `/0` suffix) does NOT mean "anyone" — it's a single-IP match for the literal address `0.0.0.0` and silently fails to match anything. The `/0` matters.
 
 Then:
 
@@ -243,9 +245,9 @@ Close Discord. tinyproxy can stay running on the VPS for next time.
 
 ---
 
-## Switching back to Direct mode
+## Switching back to UDP-only ("Direct mode")
 
-Direct mode is the original behavior — UDP voice probes only, no TCP redirection.
+Direct mode here just means *no proxy configured*. The UDP voice bypass keeps running (it always does); only the TCP redirect layer is switched off.
 
 ```sh
 sudo $EDITOR /etc/discord-wrangler/discord-wrangler.conf

@@ -52,4 +52,4 @@ After build + sudo install, verify on a real Discord client.
 ### Failure modes to verify
 - Wrong proxy creds → journal shows `socks5: user/pass auth rejected` every 30s while Discord is open. Discord can't log in.
 - Proxy down (kill the SSH tunnel mid-session) → journal shows rate-limited dial-failure warnings. Discord shows network errors.
-- Wrong `discord_uid` → launcher works, but the daemon's rule doesn't match Discord's cgroup. Discord runs in Direct mode only (voice works, TCP unproxied).
+- Wrong `discord_uid` → launcher works, but the daemon's rule doesn't match Discord's cgroup. The TCP redirect doesn't fire (Discord's TCP goes direct); the UDP voice bypass still works.
