@@ -14,6 +14,18 @@
 namespace wrangler::proxy::nft {
 namespace {
 
+// nft's `socket cgroupv2 level N "PATH"` matcher expects PATH relative to
+// the cgroup root (e.g. "user.slice/user-1000.slice/...") — NOT prefixed
+// with /sys/fs/cgroup/. The inotify watcher uses the full filesystem path,
+// so strip the prefix here when handing it to nft.
+std::string to_cgroup_relative(const std::string& path) {
+    static const std::string PREFIX = "/sys/fs/cgroup/";
+    if (path.compare(0, PREFIX.size(), PREFIX) == 0) {
+        return path.substr(PREFIX.size());
+    }
+    return path;
+}
+
 std::string render(const std::string& tmpl_path,
                    const std::string& cgroup_path,
                    uint16_t relay_port) {
@@ -30,7 +42,7 @@ std::string render(const std::string& tmpl_path,
             pos += val.size();
         }
     };
-    replace("@CGROUP_PATH@", cgroup_path);
+    replace("@CGROUP_PATH@", to_cgroup_relative(cgroup_path));
     replace("@RELAY_PORT@",  std::to_string(relay_port));
     return s;
 }
