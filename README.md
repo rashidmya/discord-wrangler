@@ -1,12 +1,10 @@
-# discord-wrangler
+# Discord Wrangler
 
-discord-wrangler is a Linux daemon that can force Discord to use a specified proxy server (HTTP or SOCKS5) for its TCP connections (chat, REST API, gateway, voice control). This may be necessary because the Discord client lacks proxy settings and ignores the system-wide proxy.
+Discord Wrangler is a Linux daemon that can force Discord to use a specified proxy server (HTTP or SOCKS5) for its TCP connections (chat, REST API, gateway, voice control). This may be necessary because the Discord client lacks proxy settings and ignores the system-wide proxy.
 
 Additionally, the daemon slightly modifies Discord's outgoing UDP traffic, which helps bypass some local restrictions on voice chats — UAE residential ISPs being the canonical case.
 
 The two pieces are independent. The UDP voice fix runs always. The TCP proxy redirect is opt-in via the conf file. If your network only DPI-blocks voice (the common case), no proxy is needed; if it also blocks Discord's TCP, configure a proxy and the daemon handles both.
-
-Linux equivalent of [hdrover/discord-drover](https://github.com/hdrover/discord-drover). The Windows version hooks Winsock in-process via DLL detours. That doesn't translate to Linux because Discord's voice runtime (Chromium WebRTC, libuv, and increasingly Rust crates like rustix doing direct syscalls and io_uring) bypasses libc — so LD_PRELOAD can't see the relevant packets. This implementation runs in kernel space via nftables NFQUEUE plus a small loopback TCP relay instead.
 
 ## How it works
 
@@ -77,8 +75,6 @@ journalctl -u discord-wrangler -f
 
 Then just launch Discord like normal.
 
-After `sudo make install`, Discord Wrangler shows up in your app launcher — same effect as `discord-wrangler-launch` from a terminal (requires `proxy` to be set in the conf).
-
 ## Configuration
 
 Override the defaults with `sudo systemctl edit discord-wrangler` (creates a drop-in override file).
@@ -118,15 +114,17 @@ Then restart the daemon:
 sudo systemctl restart discord-wrangler
 ```
 
-### 2. Launch Discord via the wrapper
+### 2. Launch Discord through the wrangler
+
+Pick **Discord Wrangler** (or **PTB** / **Canary**) from your app launcher, or from a terminal:
 
 ```sh
 discord-wrangler-launch    # instead of `discord`
 ```
 
-This places Discord inside a known cgroup v2 scope. The daemon's nftables rule matches that cgroup and redirects all of Discord's TCP to the in-daemon relay, which tunnels it through the configured upstream proxy.
+Both routes drop Discord into a known cgroup v2 scope. The daemon's nftables rule matches that cgroup and redirects all of Discord's TCP to the in-daemon relay, which tunnels it through the configured upstream proxy.
 
-If you launch Discord without the wrapper, it ends up outside the cgroup and the TCP redirect doesn't apply. The UDP voice bypass still works — that's based on packet shape, not cgroup membership.
+Launching Discord any other way — the stock Discord launcher entry, `discord` from a terminal — leaves it outside the cgroup, so the TCP redirect doesn't apply. The UDP voice bypass still works; that's based on packet shape, not cgroup membership.
 
 ### Supported proxy schemes
 
@@ -175,6 +173,6 @@ sudo bash tests/integration/test_cgroup_redirect.sh    # sudo (real netfilter)
 
 ## Credits
 
-Both the UDP-probe trick (with the specific 0x00 / 0x01 byte sequence) and the TCP-through-proxy idea are from [hdrover/discord-drover](https://github.com/hdrover/discord-drover). All credit for figuring out the probe pattern against this kind of DPI goes there.
+Both the UDP-probe trick (with the specific 0x00 / 0x01 byte sequence) and the TCP-through-proxy idea are from [hdrover/discord-drover](https://github.com/hdrover/discord-drover).
 
 doctest is vendored at `tests/unit/doctest.h` (MIT, by Viktor Kirilov).
