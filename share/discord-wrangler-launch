@@ -44,7 +44,17 @@ if ! command -v "$DISCORD_BIN" >/dev/null 2>&1; then
     exit 1
 fi
 
+# Distinct WM class so the wrangler entry doesn't shadow Discord's own .desktop
+# in the task manager (both would otherwise claim StartupWMClass=discord and
+# mislabel normal Discord windows as "Discord Wrangler").
+case "$DISCORD_BIN" in
+    discord-ptb)    default_class=discord-wrangler-ptb ;;
+    discord-canary) default_class=discord-wrangler-canary ;;
+    *)              default_class=discord-wrangler ;;
+esac
+WM_CLASS="${WRANGLER_WM_CLASS:-$default_class}"
+
 exec systemd-run --user --scope \
     --unit=discord-wrangler-discord.scope \
     --quiet \
-    -- "$DISCORD_BIN" "$@"
+    -- "$DISCORD_BIN" --class="$WM_CLASS" "$@"

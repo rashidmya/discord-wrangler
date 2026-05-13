@@ -8,5 +8,5 @@ Icon=discord-wrangler
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 StartupNotify=true
-StartupWMClass=discord-canary
+StartupWMClass=discord-wrangler-canary
 Keywords=discord;chat;voice;proxy;wrangler;canary;

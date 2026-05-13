@@ -8,5 +8,5 @@ Icon=discord-wrangler
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 StartupNotify=true
-StartupWMClass=discord-ptb
+StartupWMClass=discord-wrangler-ptb
 Keywords=discord;chat;voice;proxy;wrangler;ptb;
