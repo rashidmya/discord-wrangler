@@ -85,7 +85,8 @@ test: test-unit test-integration
 test-unit: $(addprefix run-test-,$(UNIT_TESTS))
 
 test-integration: $(DAEMON)
-	@echo "Integration tests require sudo (raw sockets, nftables). Run individually if needed:"
+	bash tests/integration/test_launch_gate.sh
+	@echo "Integration tests requiring sudo (raw sockets, nftables). Run individually if needed:"
 	@echo "  sudo tests/integration/test_inject.sh"
 	@echo "  sudo tests/integration/test_nft.sh"
 
@@ -139,19 +140,37 @@ install: $(DAEMON)
 	install -d "$(DESTDIR)$(PREFIX)/bin"
 	install -m 0755 share/discord-wrangler-launch  "$(DESTDIR)$(PREFIX)/bin/discord-wrangler-launch"
 	install -m 0755 share/discord-wrangler-cleanup "$(SBINDIR_INST)/discord-wrangler-cleanup"
+	install -d "$(DESTDIR)$(PREFIX)/share/applications"
+	install -m 0644 share/discord-wrangler.desktop \
+	    "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler.desktop"
+	install -m 0644 share/discord-wrangler-ptb.desktop \
+	    "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-ptb.desktop"
+	install -m 0644 share/discord-wrangler-canary.desktop \
+	    "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-canary.desktop"
+	@if [ -f share/discord-wrangler.png ]; then \
+	    install -d "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps"; \
+	    install -m 0644 share/discord-wrangler.png \
+	        "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/discord-wrangler.png"; \
+	else \
+	    echo "warning: share/discord-wrangler.png missing; skipping icon install (drop it in and re-run 'sudo make install' to add it)"; \
+	fi
 	@if [ -z "$(DESTDIR)" ]; then \
 	    systemd-sysusers && \
 	    systemctl daemon-reload && \
 	    systemctl enable --now discord-wrangler.service && \
+	    (command -v update-desktop-database >/dev/null 2>&1 && \
+	        update-desktop-database -q "$(PREFIX)/share/applications" || true) && \
+	    (command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+	        gtk-update-icon-cache -q -t "$(PREFIX)/share/icons/hicolor" || true) && \
 	    echo "" && \
 	    echo "Installed. Verify: systemctl status discord-wrangler" && \
 	    echo "Logs:           journalctl -u discord-wrangler -f"; \
 	else \
-	    echo "DESTDIR install: skipped systemd/sysusers (rerun without DESTDIR to activate)"; \
+	    echo "DESTDIR install: skipped systemd/sysusers + desktop cache (rerun without DESTDIR to activate)"; \
 	fi
 
 uninstall:
-	@if [ "$$(id -u)" != "0" ]; then \
+	@if [ -z "$(DESTDIR)" ] && [ "$$(id -u)" != "0" ]; then \
 	    echo "uninstall requires root (try: sudo make uninstall)"; exit 1; \
 	fi
 	-systemctl disable --now discord-wrangler.service 2>/dev/null
@@ -163,6 +182,16 @@ uninstall:
 	-rm -f "$(SBINDIR_INST)/discord-wrangler-cleanup"
 	-rm -f "$(DESTDIR)$(PREFIX)/bin/discord-wrangler-launch"
 	-rm -f "$(DESTDIR)$(SYSCONFDIR)/discord-wrangler/discord-wrangler.conf.example"
+	-rm -f "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler.desktop"
+	-rm -f "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-ptb.desktop"
+	-rm -f "$(DESTDIR)$(PREFIX)/share/applications/discord-wrangler-canary.desktop"
+	-rm -f "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/discord-wrangler.png"
+	@if [ -z "$(DESTDIR)" ]; then \
+	    command -v update-desktop-database >/dev/null 2>&1 && \
+	        update-desktop-database -q "$(PREFIX)/share/applications" || true; \
+	    command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+	        gtk-update-icon-cache -q -t "$(PREFIX)/share/icons/hicolor" || true; \
+	fi
 	@echo "(Note: $(SYSCONFDIR)/discord-wrangler/discord-wrangler.conf preserved if you customized it)"
 	-rm -f "$(SBINDIR_INST)/discord-wranglerd"
 	-rm -rf "$(DOCDIR_INST)"

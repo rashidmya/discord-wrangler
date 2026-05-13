@@ -77,6 +77,8 @@ journalctl -u discord-wrangler -f
 
 Then just launch Discord like normal.
 
+After `sudo make install`, Discord Wrangler shows up in your app launcher — same effect as `discord-wrangler-launch` from a terminal (requires `proxy` to be set in the conf).
+
 ## Configuration
 
 Override the defaults with `sudo systemctl edit discord-wrangler` (creates a drop-in override file).
@@ -165,6 +167,7 @@ Install on demand:
 Run them:
 
 ```sh
+bash tests/integration/test_launch_gate.sh             # unprivileged
 bash tests/integration/test_relay.sh                   # unprivileged
 bash tests/integration/test_relay_http.sh              # unprivileged
 sudo bash tests/integration/test_cgroup_redirect.sh    # sudo (real netfilter)

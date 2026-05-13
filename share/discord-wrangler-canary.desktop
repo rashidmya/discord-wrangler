@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Discord Wrangler Canary
+Comment=Discord Canary through the wrangler proxy
+TryExec=discord-canary
+Exec=env DISCORD_BIN=discord-canary discord-wrangler-launch
+Icon=discord-wrangler
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+StartupWMClass=discord-canary
+Keywords=discord;chat;voice;proxy;wrangler;canary;

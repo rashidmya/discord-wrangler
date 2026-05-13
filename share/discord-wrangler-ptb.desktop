@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Discord Wrangler PTB
+Comment=Discord PTB through the wrangler proxy
+TryExec=discord-ptb
+Exec=env DISCORD_BIN=discord-ptb discord-wrangler-launch
+Icon=discord-wrangler
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+StartupWMClass=discord-ptb
+Keywords=discord;chat;voice;proxy;wrangler;ptb;
