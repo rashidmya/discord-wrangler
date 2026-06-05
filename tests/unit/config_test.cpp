@@ -1,11 +1,13 @@
 #include "doctest.h"
 #include "config.hpp"
+#include "log.hpp"
 
 #include <cstdlib>
 #include <stdexcept>
 
 namespace {
 void unset_all_env() {
+    unsetenv("WRANGLER_LOG_LEVEL");
     unsetenv("WRANGLER_QUEUE_NUM");
     unsetenv("WRANGLER_FIRST_LEN");
     unsetenv("WRANGLER_HOLD_MS");
@@ -199,4 +201,34 @@ TEST_CASE("config: file with empty userinfo at mode 0644 is rejected") {
     TmpConfFile f("[wrangler]\nproxy = socks5://@host:1080\n");
     chmod(f.path.c_str(), 0644);
     CHECK_THROWS_AS(wrangler::config::from_env(), std::runtime_error);
+}
+
+// log_level lives in a global (log::g_level), not the Config struct. Reset it
+// to Info around each case so ordering between tests doesn't leak state.
+TEST_CASE("config: log_level from file applies") {
+    unset_all_env();
+    wrangler::log::g_level = wrangler::log::Level::Info;
+    TmpConfFile f("[wrangler]\nlog_level = debug\n");
+    wrangler::config::from_env();
+    CHECK(wrangler::log::g_level == wrangler::log::Level::Debug);
+    wrangler::log::g_level = wrangler::log::Level::Info;
+}
+
+TEST_CASE("config: log_level env overrides file") {
+    unset_all_env();
+    wrangler::log::g_level = wrangler::log::Level::Info;
+    TmpConfFile f("[wrangler]\nlog_level = debug\n");
+    setenv("WRANGLER_LOG_LEVEL", "error", 1);
+    wrangler::config::from_env();
+    CHECK(wrangler::log::g_level == wrangler::log::Level::Error);
+    wrangler::log::g_level = wrangler::log::Level::Info;
+}
+
+TEST_CASE("config: unknown log_level leaves current level unchanged") {
+    unset_all_env();
+    wrangler::log::g_level = wrangler::log::Level::Warn;
+    TmpConfFile f("[wrangler]\nlog_level = bogus\n");
+    wrangler::config::from_env();
+    CHECK(wrangler::log::g_level == wrangler::log::Level::Warn);
+    wrangler::log::g_level = wrangler::log::Level::Info;
 }

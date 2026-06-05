@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <cstdlib>
+#include <string_view>
 
 namespace wrangler::log {
 
@@ -14,13 +15,17 @@ enum class Level : int { Debug = 0, Info = 1, Warn = 2, Error = 3 };
 // non-atomic access is safe.
 inline Level g_level = Level::Info;
 
+// Set the level from a string name. Unknown/empty values are ignored, leaving
+// the current level unchanged.
+inline void set_level_from_string(std::string_view v) {
+    if      (v == "debug") g_level = Level::Debug;
+    else if (v == "info")  g_level = Level::Info;
+    else if (v == "warn")  g_level = Level::Warn;
+    else if (v == "error") g_level = Level::Error;
+}
+
 inline void set_level_from_env() {
-    const char* v = std::getenv("WRANGLER_LOG_LEVEL");
-    if (!v) return;
-    if      (std::strcmp(v, "debug") == 0) g_level = Level::Debug;
-    else if (std::strcmp(v, "info")  == 0) g_level = Level::Info;
-    else if (std::strcmp(v, "warn")  == 0) g_level = Level::Warn;
-    else if (std::strcmp(v, "error") == 0) g_level = Level::Error;
+    if (const char* v = std::getenv("WRANGLER_LOG_LEVEL")) set_level_from_string(v);
 }
 
 inline const char* prefix(Level l) {

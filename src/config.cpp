@@ -108,6 +108,7 @@ Config from_env() {
 
     // Precedence: env > file > default. Read file first into a temp, then
     // overlay env.
+    std::string log_level_s   = ini.count("log_level")   ? ini["log_level"]   : "";
     std::string queue_num_s   = ini.count("queue_num")   ? ini["queue_num"]   : "";
     std::string first_len_s   = ini.count("first_len")   ? ini["first_len"]   : "";
     std::string hold_ms_s     = ini.count("hold_ms")     ? ini["hold_ms"]     : "";
@@ -116,6 +117,7 @@ Config from_env() {
     std::string relay_port_s  = ini.count("relay_port")  ? ini["relay_port"]  : "";
     std::string discord_uid_s = ini.count("discord_uid") ? ini["discord_uid"] : "";
 
+    log_level_s   = env_or("WRANGLER_LOG_LEVEL",   log_level_s);
     queue_num_s   = env_or("WRANGLER_QUEUE_NUM",   queue_num_s);
     first_len_s   = env_or("WRANGLER_FIRST_LEN",   first_len_s);
     hold_ms_s     = env_or("WRANGLER_HOLD_MS",     hold_ms_s);
@@ -133,6 +135,10 @@ Config from_env() {
         }
         return static_cast<uint16_t>(x);
     };
+
+    // Apply the resolved level immediately: it lives in a global (log::g_level),
+    // not the Config struct. Empty/unknown values leave the current level intact.
+    log::set_level_from_string(log_level_s);
 
     c.queue_num   = parse_u16("queue_num",   queue_num_s,   c.queue_num);
     c.first_len   = parse_u16("first_len",   first_len_s,   c.first_len);
